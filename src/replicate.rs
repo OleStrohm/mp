@@ -3,9 +3,16 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::utils::HashMap;
 use bevy_renet::renet::{ChannelConfig, ConnectionConfig, RenetClient, RenetServer, SendType};
+use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
 use serde::{Deserialize, Serialize};
 
-use crate::shared::NetworkTick;
+#[cfg(test)]
+mod tests;
+
+pub const PROTOCOL_ID: u64 = 7;
+
+#[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+pub struct NetworkTick(pub u64);
 
 #[derive(Resource, Deref, DerefMut, Default)]
 pub struct NetworkEntities(HashMap<Entity, Entity>);
@@ -58,24 +65,33 @@ impl Plugin for ReplicationPlugin {
             .init_resource::<NetworkTick>()
             .init_resource::<NetworkEntities>()
             .insert_resource(ReplicationConnectionConfig(connection_config))
-            .add_systems(PreUpdate, receive_updated_components.run_if(is_client))
-            .add_systems(PostUpdate, send_updated_components.run_if(is_server));
+            .add_systems(
+                PreUpdate,
+                receive_updated_components
+                    .after(NetcodeClientPlugin::update_system)
+                    .run_if(is_client),
+            )
+            .add_systems(
+                PostUpdate,
+                send_updated_components
+                    .before(NetcodeServerPlugin::send_packets)
+                    .run_if(is_server),
+            );
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ReplicationPacket {
     tick: NetworkTick,
-    updates: Vec<UpdateComponent>,
+    updates: Vec<EntityUpdates>,
 }
 
 fn send_updated_components(world: &mut World) {
-    //, mut replicate: SystemState<Entity, With<Replicate>>) {
     // Create the list of updates
     let updates = world
         .query_filtered::<Entity, With<Replicate>>()
         .iter(world)
-        .flat_map(|entity| serialize_all_components(world, entity))
+        .map(|entity| serialize_all_components(world, entity))
         .collect();
     let tick = *world.resource::<NetworkTick>();
 
@@ -97,28 +113,33 @@ fn receive_updated_components(world: &mut World) {
 
     // Create the list of updates
     if let Some(packet) = packet {
-        for message in packet.updates {
-            let apply = world.resource::<ReplicationFunctions>()[message.replication_id].apply;
-            apply(world, message);
+        for EntityUpdates { entity, updates } in packet.updates {
+            for update in updates {
+                let apply = world.resource::<ReplicationFunctions>()[update.replication_id].apply;
+                apply(world, entity, update);
+            }
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct UpdateComponent {
+struct EntityUpdates {
     entity: Entity,
+    updates: Vec<UpdateComponent>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UpdateComponent {
     replication_id: usize,
     data: Vec<u8>,
 }
 
 fn update_component<T: Component + for<'a> Deserialize<'a>>(
     world: &mut World,
+    entity: Entity,
     update: UpdateComponent,
 ) {
-    let local_entity = world
-        .resource::<NetworkEntities>()
-        .get(&update.entity)
-        .copied();
+    let local_entity = world.resource::<NetworkEntities>().get(&entity).copied();
 
     let component = bincode::deserialize::<T>(&update.data).unwrap();
     match local_entity {
@@ -129,26 +150,29 @@ fn update_component<T: Component + for<'a> Deserialize<'a>>(
             let local_entity = world.spawn(component).id();
             world
                 .resource_mut::<NetworkEntities>()
-                .insert(update.entity, local_entity);
+                .insert(entity, local_entity);
         }
     }
 }
 
 struct ReplicationFunction {
     gather: fn(&World, Entity, usize) -> Option<UpdateComponent>,
-    apply: fn(&mut World, UpdateComponent),
+    apply: fn(&mut World, Entity, UpdateComponent),
 }
 
 #[derive(Resource, Deref, DerefMut, Default)]
 struct ReplicationFunctions(Vec<ReplicationFunction>);
 
-fn serialize_all_components(world: &World, entity: Entity) -> Vec<UpdateComponent> {
-    world
-        .resource::<ReplicationFunctions>()
-        .iter()
-        .enumerate()
-        .flat_map(|(replication_id, f)| (f.gather)(world, entity, replication_id))
-        .collect()
+fn serialize_all_components(world: &World, entity: Entity) -> EntityUpdates {
+    EntityUpdates {
+        entity,
+        updates: world
+            .resource::<ReplicationFunctions>()
+            .iter()
+            .enumerate()
+            .flat_map(|(replication_id, f)| (f.gather)(world, entity, replication_id))
+            .collect(),
+    }
 }
 
 fn serialize_component<T: Component + Serialize>(
@@ -159,7 +183,6 @@ fn serialize_component<T: Component + Serialize>(
     let component = world.entity(entity).get::<T>()?;
 
     Some(UpdateComponent {
-        entity,
         replication_id,
         data: bincode::serialize(component).unwrap(),
     })
@@ -188,126 +211,4 @@ fn is_client(client: Option<Res<RenetClient>>) -> bool {
 
 fn is_server(server: Option<Res<RenetServer>>) -> bool {
     server.is_some()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::net::{SocketAddr, UdpSocket};
-    use std::time::SystemTime;
-
-    use bevy_renet::renet::transport::{
-        ClientAuthentication, NetcodeClientTransport, NetcodeServerTransport, ServerAuthentication,
-        ServerConfig,
-    };
-    use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
-    use bevy_renet::{RenetClientPlugin, RenetServerPlugin};
-
-    use crate::shared::PROTOCOL_ID;
-
-    use super::*;
-
-    #[derive(Debug, Serialize, Deserialize, Component)]
-    struct ReplMarker;
-
-    fn start_server_networking(
-        mut commands: Commands,
-        connection_config: Res<ReplicationConnectionConfig>,
-    ) {
-        let server = RenetServer::new(connection_config.0.clone());
-
-        let current_time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
-        let public_addr = "127.0.0.1:5000".parse::<SocketAddr>().unwrap();
-        let socket = UdpSocket::bind(public_addr).unwrap();
-        let server_config = ServerConfig {
-            max_clients: 64,
-            protocol_id: PROTOCOL_ID,
-            authentication: ServerAuthentication::Unsecure,
-            public_addr,
-        };
-
-        let transport = NetcodeServerTransport::new(current_time, server_config, socket).unwrap();
-
-        commands.insert_resource(transport);
-        commands.insert_resource(server);
-    }
-
-    fn start_client_networking(
-        mut commands: Commands,
-        connection_config: Res<ReplicationConnectionConfig>,
-    ) {
-        let client = RenetClient::new(connection_config.0.clone());
-
-        let current_time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
-        let client_id = 0;
-        let server_addr = "127.0.0.1:5000".parse::<SocketAddr>().unwrap();
-        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let authentication = ClientAuthentication::Unsecure {
-            client_id,
-            protocol_id: PROTOCOL_ID,
-            server_addr,
-            user_data: None,
-        };
-
-        let transport = NetcodeClientTransport::new(current_time, authentication, socket).unwrap();
-
-        commands.insert_resource(transport);
-        commands.insert_resource(client);
-    }
-
-    #[test]
-    fn basic_repl() {
-        let mut server = App::new();
-        server
-            .add_plugins((
-                MinimalPlugins,
-                ReplicationPlugin,
-                RenetServerPlugin,
-                NetcodeServerPlugin,
-            ))
-            .replicate::<ReplMarker>()
-            .add_systems(Startup, start_server_networking)
-            .add_systems(Startup, |mut commands: Commands| {
-                commands.spawn((Replicate, ReplMarker));
-            });
-        let mut client = App::new();
-        client
-            .add_plugins((
-                MinimalPlugins,
-                ReplicationPlugin,
-                RenetClientPlugin,
-                NetcodeClientPlugin,
-            ))
-            .replicate::<ReplMarker>()
-            .add_systems(Startup, start_client_networking);
-
-        server.update();
-        client.update();
-
-        assert!(server.world.get_resource::<RenetServer>().is_some());
-        assert!(client.world.get_resource::<RenetClient>().is_some());
-
-        while !client
-            .world
-            .resource::<NetcodeClientTransport>()
-            .is_connected()
-        {
-            server.update();
-            client.update();
-        }
-
-        server.update();
-        client.update();
-
-        let num_markers = client
-            .world
-            .query::<&ReplMarker>()
-            .iter(&client.world)
-            .count();
-
-        assert!(num_markers == 1);
-    }
 }

@@ -7,14 +7,14 @@ use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy::utils::HashMap;
 use bevy_renet::renet::transport::{ClientAuthentication, NetcodeClientTransport};
-use bevy_renet::renet::{ConnectionConfig, RenetClient};
+use bevy_renet::renet::RenetClient;
 use bevy_renet::transport::{client_connected, NetcodeClientPlugin};
 use bevy_renet::RenetClientPlugin;
 use serde::{Deserialize, Serialize};
 
-use crate::replicate::{Channel, ReplicationConnectionConfig};
+use crate::replicate::{Channel, ReplicationConnectionConfig, NetworkTick, PROTOCOL_ID};
 use crate::server::{PlayerData, ServerMessage, ServerPacket};
-use crate::shared::{NetworkTick, SharedPlugin, FIXED_TIMESTEP, PROTOCOL_ID};
+use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
 static HOST: AtomicBool = AtomicBool::new(false);
 

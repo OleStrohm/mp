@@ -1,11 +1,5 @@
 use bevy::prelude::*;
 use bevy_renet::renet::transport::NetcodeTransportError;
-use serde::{Deserialize, Serialize};
-
-pub const PROTOCOL_ID: u64 = 7;
-
-#[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
-pub struct NetworkTick(pub u64);
 
 pub const FIXED_TIMESTEP: f32 = 0.01;
 

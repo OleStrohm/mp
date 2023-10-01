@@ -7,14 +7,14 @@ use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
 use bevy::utils::HashMap;
 use bevy_renet::renet::transport::{NetcodeServerTransport, ServerAuthentication, ServerConfig};
-use bevy_renet::renet::{ConnectionConfig, RenetServer, ServerEvent};
+use bevy_renet::renet::{RenetServer, ServerEvent};
 use bevy_renet::transport::NetcodeServerPlugin;
 use bevy_renet::RenetServerPlugin;
 use serde::{Deserialize, Serialize};
 
 use crate::client::{ClientMessage, ClientPacket, Player, PlayerColor};
-use crate::replicate::{Channel, ReplicationConnectionConfig};
-use crate::shared::{NetworkTick, SharedPlugin, FIXED_TIMESTEP, PROTOCOL_ID};
+use crate::replicate::{Channel, ReplicationConnectionConfig, NetworkTick, PROTOCOL_ID};
+use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
 pub fn server() {
     println!("Starting server!");
