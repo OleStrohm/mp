@@ -22,7 +22,7 @@ struct ReplNum(u32);
 fn start_server_networking(
     connection_config: ReplicationConnectionConfig,
 ) -> (RenetServer, NetcodeServerTransport) {
-    let server = RenetServer::new(connection_config.0.clone());
+    let server = RenetServer::new(connection_config.0);
 
     let current_time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -46,7 +46,7 @@ fn start_client_networking(
     server_port: u16,
     connection_config: ReplicationConnectionConfig,
 ) -> (RenetClient, NetcodeClientTransport) {
-    let client = RenetClient::new(connection_config.0.clone());
+    let client = RenetClient::new(connection_config.0);
 
     let current_time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -96,8 +96,7 @@ fn connect(server: &mut App, client: &mut App) {
     server
         .insert_resource(renet_server)
         .insert_resource(server_transport);
-    let (renet_client, client_transport) =
-        start_client_networking(server_port, connection_config.clone());
+    let (renet_client, client_transport) = start_client_networking(server_port, connection_config);
     client
         .insert_resource(renet_client)
         .insert_resource(client_transport);

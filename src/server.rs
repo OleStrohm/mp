@@ -13,7 +13,7 @@ use bevy_renet::RenetServerPlugin;
 use serde::{Deserialize, Serialize};
 
 use crate::client::{ClientMessage, ClientPacket, Player, PlayerColor};
-use crate::replicate::{Channel, ReplicationConnectionConfig, NetworkTick, PROTOCOL_ID};
+use crate::replicate::{Channel, NetworkTick, ReplicationConnectionConfig, PROTOCOL_ID};
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
 pub fn server() {
@@ -105,7 +105,7 @@ fn send_server_message(
     let time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
-    let messages = mem::replace(&mut messages.0, Vec::default());
+    let messages = mem::take(&mut messages.0);
 
     let packet = ServerPacket {
         time,

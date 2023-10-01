@@ -1,15 +1,18 @@
+#![allow(clippy::type_complexity)]
+
 use std::ffi::OsStr;
 use std::process::Stdio;
 
 use owo_colors::OwoColorize;
 
+
 mod client;
+mod replicate;
 mod server;
 mod shared;
-mod replicate;
 
 fn start_copy(arg: impl AsRef<OsStr>, prepended: String) -> std::process::Child {
-    let mut child = std::process::Command::new(std::env::args().nth(0).unwrap())
+    let mut child = std::process::Command::new(std::env::args().next().unwrap())
         .arg(arg)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
