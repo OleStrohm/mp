@@ -13,7 +13,7 @@ use bevy_renet::RenetServerPlugin;
 use serde::{Deserialize, Serialize};
 
 use crate::client::{ClientMessage, ClientPacket, Player, PlayerColor};
-use crate::replicate::{Channel, NetworkTick, ReplicationConnectionConfig, PROTOCOL_ID};
+use crate::replicate::{Channel, NetworkTick, ReplicationConnectionConfig, PROTOCOL_ID, ReplicationPlugin};
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
 pub fn server() {
@@ -26,6 +26,7 @@ pub fn server() {
             RenetServerPlugin,
             NetcodeServerPlugin,
             SharedPlugin,
+            ReplicationPlugin,
         ))
         .insert_resource(NetworkTick(0))
         .insert_resource(Lobby(Default::default()))

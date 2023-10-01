@@ -12,7 +12,9 @@ use bevy_renet::transport::{client_connected, NetcodeClientPlugin};
 use bevy_renet::RenetClientPlugin;
 use serde::{Deserialize, Serialize};
 
-use crate::replicate::{Channel, ReplicationConnectionConfig, NetworkTick, PROTOCOL_ID};
+use crate::replicate::{
+    Channel, NetworkTick, ReplicationConnectionConfig, ReplicationPlugin, PROTOCOL_ID,
+};
 use crate::server::{PlayerData, ServerMessage, ServerPacket};
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
@@ -23,6 +25,9 @@ pub struct ClientId(u64);
 
 #[derive(Resource, Deref, DerefMut)]
 pub struct NetworkEntities(HashMap<Entity, Entity>);
+
+#[derive(Resource, Deref, DerefMut)]
+pub struct HasSynced(bool);
 
 pub fn client(main: bool) {
     println!("Starting client!");
@@ -59,6 +64,7 @@ pub fn client(main: bool) {
             RenetClientPlugin,
             NetcodeClientPlugin,
             SharedPlugin,
+            ReplicationPlugin,
         ))
         .add_event::<ClientMessage>()
         .insert_resource(NetworkEntities(Default::default()))
@@ -115,29 +121,28 @@ fn receive_server_messages(
     mut tick: Option<ResMut<NetworkTick>>,
     mut players: Query<&mut Transform>,
     this_client_id: Res<ClientId>,
+    mut synced: ResMut<HasSynced>,
 ) {
     let Some(packet) = client.receive_message(Channel::ReliableOrdered) else { return };
     let packet: ServerPacket = bincode::deserialize(&packet).unwrap();
 
-    if !packet.messages.is_empty() {
-        let time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
+    //if !packet.messages.is_empty() {
+    //    let time = SystemTime::now()
+    //        .duration_since(SystemTime::UNIX_EPOCH)
+    //        .unwrap();
 
-        println!(
-            "Received {} message(s) at Server tick: {:?} (Client {:?})    |     {:?}",
-            packet.messages.len(),
-            packet.tick.0,
-            tick,
-            time - packet.time,
-        );
-    }
+    //    println!(
+    //        "Received {} message(s) at Server tick: {:?} (Client {:?})    |     {:?}",
+    //        packet.messages.len(),
+    //        packet.tick.0,
+    //        tick,
+    //        time - packet.time,
+    //    );
+    //}
 
     if let Some(ref mut tick) = tick {
         **tick = packet.tick;
     }
-
-    let mut tick = tick.as_deref_mut().copied();
 
     for message in packet.messages {
         match message {
@@ -150,6 +155,7 @@ fn receive_server_messages(
                         color,
                     } in state.players
                     {
+                        println!("Spawning!");
                         let spawned = commands
                             .spawn((
                                 Transform::from_translation(pos.extend(0.0)),
@@ -161,11 +167,11 @@ fn receive_server_messages(
                         network_entities.insert(network_id, spawned);
                     }
 
-                    tick = Some(packet.tick);
+                    **synced = true;
                     commands.insert_resource(packet.tick);
                 }
             }
-            message if tick.is_none() => {
+            message if !**synced => {
                 println!("Skipping {:?} because this client is not synced", message)
             }
             ServerMessage::AssignControl(client_id, network_id) => {
@@ -179,6 +185,7 @@ fn receive_server_messages(
                 pos,
                 color,
             }) => {
+                println!("Spawning!");
                 let spawned = commands
                     .spawn((
                         Player,
@@ -291,7 +298,8 @@ fn start_client_networking(
 
     commands.insert_resource(transport);
     commands.insert_resource(client);
-    commands.insert_resource(ClientId(client_id))
+    commands.insert_resource(ClientId(client_id));
+    commands.insert_resource(HasSynced(false));
     //commands.spawn((
     //    Player,
     //    SpriteBundle {

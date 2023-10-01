@@ -35,7 +35,7 @@ impl From<Channel> for u8 {
 #[derive(Resource, Deref, DerefMut, Default, Clone)]
 pub struct ReplicationConnectionConfig(pub ConnectionConfig);
 
-struct ReplicationPlugin;
+pub struct ReplicationPlugin;
 
 impl Plugin for ReplicationPlugin {
     fn build(&self, app: &mut App) {
