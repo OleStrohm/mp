@@ -189,7 +189,7 @@ fn gather_component<T: Component + Serialize>(world: &World, entity: Entity) -> 
 }
 
 // Implement convenience method on App
-trait AppExt {
+pub trait AppExt {
     fn replicate<T: Component + Serialize + for<'a> Deserialize<'a>>(&mut self) -> &mut Self;
     fn replicate_with<T: Component>(
         &mut self,

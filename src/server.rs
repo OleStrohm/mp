@@ -12,8 +12,11 @@ use bevy_renet::transport::NetcodeServerPlugin;
 use bevy_renet::RenetServerPlugin;
 use serde::{Deserialize, Serialize};
 
-use crate::client::{ClientMessage, ClientPacket, Player, PlayerColor};
-use crate::replicate::{Channel, NetworkTick, ReplicationConnectionConfig, PROTOCOL_ID, ReplicationPlugin};
+use crate::client::{ClientId, ClientMessage, ClientPacket, Control, Player, PlayerColor};
+use crate::replicate::{
+    AppExt, Channel, NetworkTick, Replicate, ReplicationConnectionConfig, ReplicationPlugin,
+    PROTOCOL_ID,
+};
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
 pub fn server() {
@@ -28,12 +31,25 @@ pub fn server() {
             SharedPlugin,
             ReplicationPlugin,
         ))
+        .replicate::<Control>()
+        .replicate::<Player>()
+        .replicate::<PlayerColor>()
+        .replicate_with::<Transform>(
+            |component| bincode::serialize(&component.translation).unwrap(),
+            |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
+        )
         .insert_resource(NetworkTick(0))
         .insert_resource(Lobby(Default::default()))
         .insert_resource(ServerMessages(Default::default()))
         .add_systems(Startup, start_server_networking)
         .add_systems(Update, (spawn_avatar, buffer_messages))
-        .add_systems(FixedUpdate, (send_server_message, receive_client_messages))
+        .add_systems(
+            FixedUpdate,
+            (
+                receive_client_messages,
+                //send_server_message
+            ),
+        )
         .run();
 }
 
@@ -142,6 +158,8 @@ fn spawn_avatar(
 
                 let avatar = commands
                     .spawn((
+                        Replicate,
+                        Control(ClientId(*client_id)),
                         Player,
                         PlayerColor(color),
                         //Transform::default(),

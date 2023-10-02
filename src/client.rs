@@ -2,6 +2,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
+use bevy::audio::AudioPlugin;
 use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
@@ -13,15 +14,18 @@ use bevy_renet::RenetClientPlugin;
 use serde::{Deserialize, Serialize};
 
 use crate::replicate::{
-    Channel, NetworkTick, ReplicationConnectionConfig, ReplicationPlugin, PROTOCOL_ID,
+    AppExt, Channel, NetworkTick, ReplicationConnectionConfig, ReplicationPlugin, PROTOCOL_ID,
 };
 use crate::server::{PlayerData, ServerMessage, ServerPacket};
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
 static HOST: AtomicBool = AtomicBool::new(false);
 
-#[derive(Resource, Deref, DerefMut)]
-pub struct ClientId(u64);
+#[derive(Resource, Deref, DerefMut, Serialize, Deserialize, PartialEq)]
+pub struct ClientId(pub u64);
+
+#[derive(Component, Serialize, Deserialize)]
+pub struct Control(pub ClientId);
 
 #[derive(Resource, Deref, DerefMut)]
 pub struct NetworkEntities(HashMap<Entity, Entity>);
@@ -38,34 +42,43 @@ pub fn client(main: bool) {
 
     App::new()
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: if main {
-                        "Making a game in Rust with Bevy".to_string()
-                    } else {
-                        "Making a game in Rust with Bevy - player 2".to_string()
-                    },
-                    position: if main {
-                        WindowPosition::Centered(MonitorSelection::Primary)
-                    } else {
-                        WindowPosition::At((10, 10).into())
-                    },
-                    resolution: if main {
-                        (monitor_width / 2.0, monitor_height / 2.0).into()
-                    } else {
-                        (monitor_width / 4.75, monitor_height / 4.75).into()
-                    },
-                    resizable: false,
-                    decorations: false,
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: if main {
+                            "Making a game in Rust with Bevy".to_string()
+                        } else {
+                            "Making a game in Rust with Bevy - player 2".to_string()
+                        },
+                        position: if main {
+                            WindowPosition::Centered(MonitorSelection::Primary)
+                        } else {
+                            WindowPosition::At((10, 10).into())
+                        },
+                        resolution: if main {
+                            (monitor_width / 2.0, monitor_height / 2.0).into()
+                        } else {
+                            (monitor_width / 4.75, monitor_height / 4.75).into()
+                        },
+                        resizable: false,
+                        decorations: false,
+                        ..default()
+                    }),
                     ..default()
-                }),
-                ..default()
-            }),
+                })
+                .disable::<AudioPlugin>(/* Disabled due to audio bug with pipewire */),
             RenetClientPlugin,
             NetcodeClientPlugin,
             SharedPlugin,
             ReplicationPlugin,
         ))
+        .replicate::<Control>()
+        .replicate::<Player>()
+        .replicate::<PlayerColor>()
+        .replicate_with::<Transform>(
+            |component| bincode::serialize(&component.translation).unwrap(),
+            |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
+        )
         .add_event::<ClientMessage>()
         .insert_resource(NetworkEntities(Default::default()))
         .add_systems(Startup, (startup, start_client_networking))
@@ -177,7 +190,7 @@ fn receive_server_messages(
             ServerMessage::AssignControl(client_id, network_id) => {
                 if client_id == this_client_id.0 {
                     let local_entity = *network_entities.get(&network_id).unwrap();
-                    commands.entity(local_entity).insert(Control);
+                    //commands.entity(local_entity).insert(Control);
                 }
             }
             ServerMessage::SpawnEntity(PlayerData {
@@ -205,12 +218,9 @@ fn receive_server_messages(
 }
 
 #[derive(Component, Serialize, Deserialize)]
-pub struct Control;
-
-#[derive(Component, Serialize, Deserialize)]
 pub struct Player;
 
-#[derive(Component)]
+#[derive(Component, Serialize, Deserialize)]
 pub struct PlayerColor(pub Color);
 
 fn add_visual_for_other_players(
@@ -231,12 +241,16 @@ fn add_visual_for_other_players(
 }
 
 fn move_player(
-    mut query: Query<&Transform, With<Control>>,
+    mut query: Query<(&Transform, &Control)>,
     input: Res<Input<KeyCode>>,
     //time: Res<Time>,
     mut message: EventWriter<ClientMessage>,
+    client_id: Res<ClientId>,
 ) {
-    for _tf in &mut query {
+    for (_tf, control) in &mut query {
+        if control.0 != *client_id {
+            continue;
+        }
         let mut dir = Vec3::splat(0.0);
         if input.pressed(KeyCode::W) {
             dir += Vec3::Y;
