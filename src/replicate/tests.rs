@@ -265,32 +265,8 @@ fn replicate_transform() {
     let (mut server, mut client) = create_apps();
     for app in [&mut server, &mut client] {
         app.replicate_with::<Transform>(
-            |world, entity, replication_id| {
-                let component = world.entity(entity).get::<Transform>()?;
-
-                Some(UpdateComponent {
-                    replication_id,
-                    data: bincode::serialize(&component.translation).unwrap(),
-                })
-            },
-            |world, entity, update| {
-                let local_entity = world.resource::<NetworkEntities>().get(&entity).copied();
-
-                let component = Transform::from_translation(
-                    bincode::deserialize::<Vec3>(&update.data).unwrap(),
-                );
-                match local_entity {
-                    Some(local_entity) => {
-                        world.entity_mut(local_entity).insert(component);
-                    }
-                    None => {
-                        let local_entity = world.spawn(component).id();
-                        world
-                            .resource_mut::<NetworkEntities>()
-                            .insert(entity, local_entity);
-                    }
-                }
-            },
+            |component| bincode::serialize(&component.translation).unwrap(),
+            |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
         );
     }
 

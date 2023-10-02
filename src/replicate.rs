@@ -115,8 +115,10 @@ fn receive_updated_components(world: &mut World) {
     if let Some(packet) = packet {
         for EntityUpdates { entity, updates } in packet.updates {
             for update in updates {
-                let apply = world.resource::<ReplicationFunctions>()[update.replication_id].update;
-                apply(world, entity, update);
+                world.resource_scope::<ReplicationFunctions, ()>(|world, f| {
+                    let apply = &f[update.replication_id].update;
+                    apply(world, entity, &update.data);
+                })
             }
         }
     }
@@ -137,11 +139,11 @@ struct UpdateComponent {
 fn update_component<T: Component + for<'a> Deserialize<'a>>(
     world: &mut World,
     entity: Entity,
-    update: UpdateComponent,
+    data: &[u8],
 ) {
     let local_entity = world.resource::<NetworkEntities>().get(&entity).copied();
 
-    let component = bincode::deserialize::<T>(&update.data).unwrap();
+    let component = bincode::deserialize::<T>(data).unwrap();
     match local_entity {
         Some(local_entity) => {
             world.entity_mut(local_entity).insert(component);
@@ -156,8 +158,8 @@ fn update_component<T: Component + for<'a> Deserialize<'a>>(
 }
 
 struct ReplicationFunction {
-    gather: fn(&World, Entity, usize) -> Option<UpdateComponent>,
-    update: fn(&mut World, Entity, UpdateComponent),
+    gather: Box<dyn Fn(&World, Entity) -> Option<Vec<u8>> + Send + Sync>,
+    update: Box<dyn Fn(&mut World, Entity, &[u8]) + Send + Sync>,
 }
 
 #[derive(Resource, Deref, DerefMut, Default)]
@@ -170,22 +172,20 @@ fn serialize_all_components(world: &World, entity: Entity) -> EntityUpdates {
             .resource::<ReplicationFunctions>()
             .iter()
             .enumerate()
-            .flat_map(|(replication_id, f)| (f.gather)(world, entity, replication_id))
+            .flat_map(|(replication_id, f)| {
+                Some(UpdateComponent {
+                    replication_id,
+                    data: (f.gather)(world, entity)?,
+                })
+            })
             .collect(),
     }
 }
 
-fn gather_component<T: Component + Serialize>(
-    world: &World,
-    entity: Entity,
-    replication_id: usize,
-) -> Option<UpdateComponent> {
+fn gather_component<T: Component + Serialize>(world: &World, entity: Entity) -> Option<Vec<u8>> {
     let component = world.entity(entity).get::<T>()?;
 
-    Some(UpdateComponent {
-        replication_id,
-        data: bincode::serialize(component).unwrap(),
-    })
+    Some(bincode::serialize(component).unwrap())
 }
 
 // Implement convenience method on App
@@ -193,8 +193,8 @@ trait AppExt {
     fn replicate<T: Component + Serialize + for<'a> Deserialize<'a>>(&mut self) -> &mut Self;
     fn replicate_with<T: Component>(
         &mut self,
-        gather: fn(&World, Entity, usize) -> Option<UpdateComponent>,
-        update: fn(&mut World, Entity, UpdateComponent),
+        gather: impl Fn(&T) -> Vec<u8> + Send + Sync + 'static,
+        update: impl Fn(&[u8]) -> T + Send + Sync + 'static,
     ) -> &mut Self;
 }
 
@@ -203,20 +203,42 @@ impl AppExt for App {
         self.world
             .resource_mut::<ReplicationFunctions>()
             .push(ReplicationFunction {
-                gather: gather_component::<T>,
-                update: update_component::<T>,
+                gather: Box::new(gather_component::<T>),
+                update: Box::new(update_component::<T>),
             });
         self
     }
 
     fn replicate_with<T: Component>(
         &mut self,
-        gather: fn(&World, Entity, usize) -> Option<UpdateComponent>,
-        update: fn(&mut World, Entity, UpdateComponent),
+        gather: impl Fn(&T) -> Vec<u8> + Send + Sync + 'static,
+        update: impl Fn(&[u8]) -> T + Send + Sync + 'static,
     ) -> &mut Self {
         self.world
             .resource_mut::<ReplicationFunctions>()
-            .push(ReplicationFunction { gather, update });
+            .push(ReplicationFunction {
+                gather: Box::new(move |world, entity| {
+                    let component = world.entity(entity).get::<T>()?;
+
+                    Some(gather(component))
+                }),
+                update: Box::new(move |world, entity, data| {
+                    let local_entity = world.resource::<NetworkEntities>().get(&entity).copied();
+
+                    let component = update(data);
+                    match local_entity {
+                        Some(local_entity) => {
+                            world.entity_mut(local_entity).insert(component);
+                        }
+                        None => {
+                            let local_entity = world.spawn(component).id();
+                            world
+                                .resource_mut::<NetworkEntities>()
+                                .insert(entity, local_entity);
+                        }
+                    }
+                }),
+            });
         self
     }
 }
