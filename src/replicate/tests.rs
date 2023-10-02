@@ -72,14 +72,14 @@ fn create_apps() -> (App, App) {
         MinimalPlugins,
         RenetServerPlugin,
         NetcodeServerPlugin,
-        ReplicationPlugin,
+        ReplicationPlugin::with_step(0.01),
     ));
     let mut client = App::new();
     client.add_plugins((
         MinimalPlugins,
         RenetClientPlugin,
         NetcodeClientPlugin,
-        ReplicationPlugin,
+        ReplicationPlugin::with_step(0.01),
     ));
 
     (server, client)

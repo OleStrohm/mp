@@ -6,8 +6,14 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, RenetClient, RenetServe
 use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
 use serde::{Deserialize, Serialize};
 
+use self::schedule::{
+    run_network_fixed, NetworkFixedTime, NetworkResimulate, NetworkScheduleOrder, NetworkUpdateTick,
+};
+
 #[cfg(test)]
 mod tests;
+
+pub mod schedule;
 
 pub const PROTOCOL_ID: u64 = 7;
 
@@ -32,10 +38,19 @@ impl From<Channel> for u8 {
     }
 }
 
+#[derive(Debug, Component, Deref, DerefMut)]
+pub struct Replicated<T>(pub T);
+
 #[derive(Resource, Deref, DerefMut, Default, Clone)]
 pub struct ReplicationConnectionConfig(pub ConnectionConfig);
 
-pub struct ReplicationPlugin;
+pub struct ReplicationPlugin(f32);
+
+impl ReplicationPlugin {
+    pub fn with_step(period: f32) -> Self {
+        ReplicationPlugin(period)
+    }
+}
 
 impl Plugin for ReplicationPlugin {
     fn build(&self, app: &mut App) {
@@ -62,8 +77,10 @@ impl Plugin for ReplicationPlugin {
         };
 
         app.init_resource::<ReplicationFunctions>()
+            .init_resource::<NetworkScheduleOrder>()
             .init_resource::<NetworkTick>()
             .init_resource::<NetworkEntities>()
+            .insert_resource(NetworkFixedTime(FixedTime::new_from_secs(self.0)))
             .insert_resource(ReplicationConnectionConfig(connection_config))
             .add_systems(
                 PreUpdate,
@@ -71,12 +88,34 @@ impl Plugin for ReplicationPlugin {
                     .after(NetcodeClientPlugin::update_system)
                     .run_if(is_client),
             )
+            .add_systems(Update, run_network_fixed)
             .add_systems(
                 PostUpdate,
                 send_updated_components
                     .before(NetcodeServerPlugin::send_packets)
                     .run_if(is_server),
-            );
+            )
+            .add_systems(NetworkUpdateTick, increment_tick)
+            .add_systems(NetworkResimulate, apply_deferred.after(CopyReplicated));
+    }
+}
+
+fn increment_tick(mut tick: ResMut<NetworkTick>) {
+    tick.0 += 1;
+}
+
+#[derive(Debug, SystemSet, Clone, PartialEq, Eq, Hash)]
+struct CopyReplicated;
+
+fn copy_replicated_component<T: Component>(world: &mut World) {
+    for entity in world
+        .query_filtered::<Entity, With<Replicated<T>>>()
+        .iter(world)
+        .collect::<Vec<_>>()
+    {
+        let mut entity = world.entity_mut(entity);
+        let component = entity.take::<Replicated<T>>().unwrap().0;
+        entity.insert(component);
     }
 }
 
@@ -136,27 +175,6 @@ struct UpdateComponent {
     data: Vec<u8>,
 }
 
-fn update_component<T: Component + for<'a> Deserialize<'a>>(
-    world: &mut World,
-    entity: Entity,
-    data: &[u8],
-) {
-    let local_entity = world.resource::<NetworkEntities>().get(&entity).copied();
-
-    let component = bincode::deserialize::<T>(data).unwrap();
-    match local_entity {
-        Some(local_entity) => {
-            world.entity_mut(local_entity).insert(component);
-        }
-        None => {
-            let local_entity = world.spawn(component).id();
-            world
-                .resource_mut::<NetworkEntities>()
-                .insert(entity, local_entity);
-        }
-    }
-}
-
 struct ReplicationFunction {
     gather: Box<dyn Fn(&World, Entity) -> Option<Vec<u8>> + Send + Sync>,
     update: Box<dyn Fn(&mut World, Entity, &[u8]) + Send + Sync>,
@@ -182,12 +200,6 @@ fn serialize_all_components(world: &World, entity: Entity) -> EntityUpdates {
     }
 }
 
-fn gather_component<T: Component + Serialize>(world: &World, entity: Entity) -> Option<Vec<u8>> {
-    let component = world.entity(entity).get::<T>()?;
-
-    Some(bincode::serialize(component).unwrap())
-}
-
 // Implement convenience method on App
 pub trait AppExt {
     fn replicate<T: Component + Serialize + for<'a> Deserialize<'a>>(&mut self) -> &mut Self;
@@ -200,13 +212,10 @@ pub trait AppExt {
 
 impl AppExt for App {
     fn replicate<T: Component + Serialize + for<'a> Deserialize<'a>>(&mut self) -> &mut Self {
-        self.world
-            .resource_mut::<ReplicationFunctions>()
-            .push(ReplicationFunction {
-                gather: Box::new(gather_component::<T>),
-                update: Box::new(update_component::<T>),
-            });
-        self
+        self.replicate_with::<T>(
+            |component| bincode::serialize(component).unwrap(),
+            |data| bincode::deserialize(data).unwrap(),
+        )
     }
 
     fn replicate_with<T: Component>(
@@ -214,6 +223,10 @@ impl AppExt for App {
         gather: impl Fn(&T) -> Vec<u8> + Send + Sync + 'static,
         update: impl Fn(&[u8]) -> T + Send + Sync + 'static,
     ) -> &mut Self {
+        self.add_systems(
+            NetworkResimulate,
+            copy_replicated_component::<T>.in_set(CopyReplicated),
+        );
         self.world
             .resource_mut::<ReplicationFunctions>()
             .push(ReplicationFunction {
@@ -225,7 +238,7 @@ impl AppExt for App {
                 update: Box::new(move |world, entity, data| {
                     let local_entity = world.resource::<NetworkEntities>().get(&entity).copied();
 
-                    let component = update(data);
+                    let component = Replicated(update(data));
                     match local_entity {
                         Some(local_entity) => {
                             world.entity_mut(local_entity).insert(component);

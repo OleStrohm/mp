@@ -3,20 +3,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use bevy::audio::AudioPlugin;
-use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
+use bevy::reflect::TypePath;
 use bevy::render::camera::ScalingMode;
-use bevy::utils::HashMap;
 use bevy_renet::renet::transport::{ClientAuthentication, NetcodeClientTransport};
 use bevy_renet::renet::RenetClient;
 use bevy_renet::transport::{client_connected, NetcodeClientPlugin};
 use bevy_renet::RenetClientPlugin;
+use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::replicate::schedule::*;
 use crate::replicate::{
     AppExt, Channel, NetworkTick, ReplicationConnectionConfig, ReplicationPlugin, PROTOCOL_ID,
 };
-use crate::server::{PlayerData, ServerMessage, ServerPacket};
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
 static HOST: AtomicBool = AtomicBool::new(false);
@@ -24,14 +24,8 @@ static HOST: AtomicBool = AtomicBool::new(false);
 #[derive(Resource, Deref, DerefMut, Serialize, Deserialize, PartialEq)]
 pub struct ClientId(pub u64);
 
-#[derive(Component, Serialize, Deserialize)]
-pub struct Control(pub ClientId);
-
-#[derive(Resource, Deref, DerefMut)]
-pub struct NetworkEntities(HashMap<Entity, Entity>);
-
-#[derive(Resource, Deref, DerefMut)]
-pub struct HasSynced(bool);
+#[derive(Component, Serialize, Deserialize, Clone)]
+pub struct Control;
 
 pub fn client(main: bool) {
     println!("Starting client!");
@@ -70,55 +64,62 @@ pub fn client(main: bool) {
             RenetClientPlugin,
             NetcodeClientPlugin,
             SharedPlugin,
-            ReplicationPlugin,
+            ReplicationPlugin::with_step(FIXED_TIMESTEP),
+            InputManagerPlugin::<Action>::default(),
         ))
         .replicate::<Control>()
         .replicate::<Player>()
-        .replicate::<PlayerColor>()
         .replicate_with::<Transform>(
             |component| bincode::serialize(&component.translation).unwrap(),
             |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
         )
-        .add_event::<ClientMessage>()
-        .insert_resource(NetworkEntities(Default::default()))
         .add_systems(Startup, (startup, start_client_networking))
         .add_systems(
             Update,
             (
-                add_visual_for_other_players,
+                player_blueprint,
                 send_client_messages.run_if(client_connected()),
             ),
         )
-        .add_systems(FixedUpdate, move_player)
-        .add_systems(Update, receive_server_messages)
+        .add_systems(NetworkPreUpdate, copy_input_for_tick)
+        .add_systems(NetworkUpdate, handle_input)
+        .add_systems(NetworkBlueprint, player_blueprint)
         .run();
 }
 
-#[derive(Event, Debug, Serialize, Deserialize, Clone, Copy)]
-pub enum ClientMessage {
-    MoveMe(Vec2),
+fn copy_input_for_tick(tick: Res<NetworkTick>, inputs: Query<&ActionState<Action>, With<Control>>) {
+
+}
+
+#[derive(Actionlike, Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, TypePath)]
+pub enum Action {
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ClientPacket {
     pub time: Duration,
     pub tick: NetworkTick,
-    pub messages: Vec<ClientMessage>,
+    pub actions: ActionState<Action>,
 }
 
 fn send_client_messages(
-    mut messsage_reader: EventReader<ClientMessage>,
     mut client: ResMut<RenetClient>,
+    player: Query<&ActionState<Action>, (With<Player>, With<Control>)>,
 ) {
+    let Ok(actions) = player.get_single() else { return };
+
     let time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
-    let messages = messsage_reader.into_iter().cloned().collect();
 
     let packet = ClientPacket {
         time,
         tick: NetworkTick(0),
-        messages,
+        actions: actions.clone(),
     };
 
     client.send_message(
@@ -127,149 +128,63 @@ fn send_client_messages(
     );
 }
 
-fn receive_server_messages(
-    mut commands: Commands,
-    mut network_entities: ResMut<NetworkEntities>,
-    mut client: ResMut<RenetClient>,
-    mut tick: Option<ResMut<NetworkTick>>,
-    mut players: Query<&mut Transform>,
-    this_client_id: Res<ClientId>,
-    mut synced: ResMut<HasSynced>,
-) {
-    let Some(packet) = client.receive_message(Channel::ReliableOrdered) else { return };
-    let packet: ServerPacket = bincode::deserialize(&packet).unwrap();
-
-    //if !packet.messages.is_empty() {
-    //    let time = SystemTime::now()
-    //        .duration_since(SystemTime::UNIX_EPOCH)
-    //        .unwrap();
-
-    //    println!(
-    //        "Received {} message(s) at Server tick: {:?} (Client {:?})    |     {:?}",
-    //        packet.messages.len(),
-    //        packet.tick.0,
-    //        tick,
-    //        time - packet.time,
-    //    );
-    //}
-
-    if let Some(ref mut tick) = tick {
-        **tick = packet.tick;
-    }
-
-    for message in packet.messages {
-        match message {
-            ServerMessage::FullSync(client_id, state) => {
-                if client_id == this_client_id.0 {
-                    println!("Syncing! {:?}", state.players);
-                    for PlayerData {
-                        network_id,
-                        pos,
-                        color,
-                    } in state.players
-                    {
-                        println!("Spawning!");
-                        let spawned = commands
-                            .spawn((
-                                Transform::from_translation(pos.extend(0.0)),
-                                PlayerColor(color),
-                                Player,
-                            ))
-                            .id();
-
-                        network_entities.insert(network_id, spawned);
-                    }
-
-                    **synced = true;
-                    commands.insert_resource(packet.tick);
-                }
-            }
-            message if !**synced => {
-                println!("Skipping {:?} because this client is not synced", message)
-            }
-            ServerMessage::AssignControl(client_id, network_id) => {
-                if client_id == this_client_id.0 {
-                    let local_entity = *network_entities.get(&network_id).unwrap();
-                    //commands.entity(local_entity).insert(Control);
-                }
-            }
-            ServerMessage::SpawnEntity(PlayerData {
-                network_id,
-                pos,
-                color,
-            }) => {
-                println!("Spawning!");
-                let spawned = commands
-                    .spawn((
-                        Player,
-                        Transform::from_translation(pos.extend(0.0)),
-                        PlayerColor(color),
-                    ))
-                    .id();
-                network_entities.insert(network_id, spawned);
-            }
-            ServerMessage::MoveEntity(network_id, dir) => {
-                let local_entity = *network_entities.get(&network_id).unwrap();
-                players.get_mut(local_entity).unwrap().translation +=
-                    dir.extend(0.0) * FIXED_TIMESTEP;
-            }
-        }
-    }
+#[derive(Component, Serialize, Deserialize)]
+pub struct Player {
+    pub color: Color,
+    pub controller: ClientId,
 }
 
-#[derive(Component, Serialize, Deserialize)]
-pub struct Player;
-
-#[derive(Component, Serialize, Deserialize)]
-pub struct PlayerColor(pub Color);
-
-fn add_visual_for_other_players(
+fn player_blueprint(
     mut commands: Commands,
-    others: Query<(Entity, Option<&Transform>, &PlayerColor), (Added<Player>, Without<Sprite>)>,
+    new_players: Query<(Entity, &Player), Added<Player>>,
+    client_id: Res<ClientId>,
 ) {
-    for (other, tf, color) in &others {
+    for (other, player) in &new_players {
+        let color = player.color;
+        let in_control = player.controller == *client_id;
         commands.entity(other).insert(SpriteBundle {
             sprite: Sprite {
-                color: color.0,
+                color,
                 custom_size: Some(Vec2::splat(1.0)),
                 ..default()
             },
-            transform: tf.copied().unwrap_or_default(),
             ..default()
         });
+
+        if in_control {
+            commands.entity(other).insert((
+                Control,
+                InputManagerBundle::<Action> {
+                    action_state: default(),
+                    input_map: InputMap::new([
+                        (KeyCode::W, Action::Up),
+                        (KeyCode::A, Action::Left),
+                        (KeyCode::S, Action::Down),
+                        (KeyCode::D, Action::Right),
+                    ]),
+                },
+            ));
+        }
     }
 }
 
-fn move_player(
-    mut query: Query<(&Transform, &Control)>,
-    input: Res<Input<KeyCode>>,
-    //time: Res<Time>,
-    mut message: EventWriter<ClientMessage>,
-    client_id: Res<ClientId>,
-) {
-    for (_tf, control) in &mut query {
-        if control.0 != *client_id {
-            continue;
+fn handle_input(mut players: Query<(&mut Transform, &ActionState<Action>), With<Player>>) {
+    for (mut tf, actions) in &mut players {
+        let mut dir = Vec2::splat(0.0);
+        if actions.pressed(Action::Up) {
+            dir.y += 1.0;
         }
-        let mut dir = Vec3::splat(0.0);
-        if input.pressed(KeyCode::W) {
-            dir += Vec3::Y;
+        if actions.pressed(Action::Down) {
+            dir.y -= 1.0;
         }
-        if input.pressed(KeyCode::S) {
-            dir -= Vec3::Y;
+        if actions.pressed(Action::Left) {
+            dir.x -= 1.0;
         }
-        if input.pressed(KeyCode::A) {
-            dir -= Vec3::X;
-        }
-        if input.pressed(KeyCode::D) {
-            dir += Vec3::X;
+        if actions.pressed(Action::Right) {
+            dir.x += 1.0;
         }
 
-        if dir != Vec3::ZERO {
-            //tf.translation += dir * time.delta_seconds() * 400.0;
-            dir *= 4.0;
-            message.send(ClientMessage::MoveMe(dir.xy()));
-        }
+        tf.translation += 6.0 * dir.extend(0.0) * FIXED_TIMESTEP;
     }
 }
 
@@ -313,7 +228,6 @@ fn start_client_networking(
     commands.insert_resource(transport);
     commands.insert_resource(client);
     commands.insert_resource(ClientId(client_id));
-    commands.insert_resource(HasSynced(false));
     //commands.spawn((
     //    Player,
     //    SpriteBundle {

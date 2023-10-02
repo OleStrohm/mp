@@ -9,6 +9,7 @@ edition = "2021"
 bevy = { version = "0.11.2", features = [ "dynamic_linking" ] }
 bevy_renet = "0.0.9"
 bincode = "1.3.3"
+leafwing-input-manager = "0.10.0"
 noise = "0.8.1"
 owo-colors = "3.5.0"
 rand = "0.8.5"
