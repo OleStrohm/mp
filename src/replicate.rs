@@ -115,7 +115,7 @@ fn receive_updated_components(world: &mut World) {
     if let Some(packet) = packet {
         for EntityUpdates { entity, updates } in packet.updates {
             for update in updates {
-                let apply = world.resource::<ReplicationFunctions>()[update.replication_id].apply;
+                let apply = world.resource::<ReplicationFunctions>()[update.replication_id].update;
                 apply(world, entity, update);
             }
         }
@@ -157,7 +157,7 @@ fn update_component<T: Component + for<'a> Deserialize<'a>>(
 
 struct ReplicationFunction {
     gather: fn(&World, Entity, usize) -> Option<UpdateComponent>,
-    apply: fn(&mut World, Entity, UpdateComponent),
+    update: fn(&mut World, Entity, UpdateComponent),
 }
 
 #[derive(Resource, Deref, DerefMut, Default)]
@@ -175,7 +175,7 @@ fn serialize_all_components(world: &World, entity: Entity) -> EntityUpdates {
     }
 }
 
-fn serialize_component<T: Component + Serialize>(
+fn gather_component<T: Component + Serialize>(
     world: &World,
     entity: Entity,
     replication_id: usize,
@@ -191,6 +191,11 @@ fn serialize_component<T: Component + Serialize>(
 // Implement convenience method on App
 trait AppExt {
     fn replicate<T: Component + Serialize + for<'a> Deserialize<'a>>(&mut self) -> &mut Self;
+    fn replicate_with<T: Component>(
+        &mut self,
+        gather: fn(&World, Entity, usize) -> Option<UpdateComponent>,
+        update: fn(&mut World, Entity, UpdateComponent),
+    ) -> &mut Self;
 }
 
 impl AppExt for App {
@@ -198,9 +203,20 @@ impl AppExt for App {
         self.world
             .resource_mut::<ReplicationFunctions>()
             .push(ReplicationFunction {
-                gather: serialize_component::<T>,
-                apply: update_component::<T>,
+                gather: gather_component::<T>,
+                update: update_component::<T>,
             });
+        self
+    }
+
+    fn replicate_with<T: Component>(
+        &mut self,
+        gather: fn(&World, Entity, usize) -> Option<UpdateComponent>,
+        update: fn(&mut World, Entity, UpdateComponent),
+    ) -> &mut Self {
+        self.world
+            .resource_mut::<ReplicationFunctions>()
+            .push(ReplicationFunction { gather, update });
         self
     }
 }
