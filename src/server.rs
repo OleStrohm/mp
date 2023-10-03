@@ -10,10 +10,11 @@ use bevy_renet::transport::NetcodeServerPlugin;
 use bevy_renet::RenetServerPlugin;
 use leafwing_input_manager::prelude::ActionState;
 
-use crate::client::{Action, ClientId, ClientPacket, Control, Player};
-use crate::replicate::schedule::{NetworkFixedTime, NetworkUpdate};
+use crate::client::{Action, ActionHistory, ClientId, ClientPacket, Control, Player};
+use crate::replicate::schedule::{NetworkFixedTime, NetworkPreUpdate, NetworkUpdate};
 use crate::replicate::{
-    AppExt, Channel, Replicate, ReplicationConnectionConfig, ReplicationPlugin, PROTOCOL_ID,
+    copy_input_from_history, AppExt, Channel, NetworkTick, Replicate, ReplicationConnectionConfig,
+    ReplicationPlugin, PROTOCOL_ID,
 };
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
@@ -40,9 +41,16 @@ pub fn server() {
         .init_resource::<Lobby>()
         .add_systems(Startup, start_server_networking)
         .add_systems(Update, spawn_avatar)
+        .add_systems(NetworkUpdate, (handle_input).chain())
         .add_systems(
-            NetworkUpdate,
-            (receive_client_messages, handle_input).chain(),
+            NetworkPreUpdate,
+            (
+                receive_client_messages,
+                apply_deferred,
+                copy_input_from_history,
+                apply_deferred,
+            )
+                .chain(),
         )
         .run();
 }
@@ -55,9 +63,10 @@ fn receive_client_messages(
     for client_id in server.clients_id() {
         while let Some(message) = server.receive_message(client_id, Channel::ReliableOrdered) {
             let packet = bincode::deserialize::<ClientPacket>(&message).unwrap();
-            let actions = packet.actions;
+            let history = packet.history;
             let client_entity = *lobby.get(&client_id).unwrap();
-            commands.entity(client_entity).insert(actions);
+
+            commands.entity(client_entity).insert(history);
         }
     }
 }

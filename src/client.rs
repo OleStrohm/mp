@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
@@ -13,7 +14,7 @@ use bevy_renet::RenetClientPlugin;
 use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::replicate::schedule::*;
+use crate::replicate::{schedule::*, Predict, Resimulating, SyncedServerTick, copy_input_from_history};
 use crate::replicate::{
     AppExt, Channel, NetworkTick, ReplicationConnectionConfig, ReplicationPlugin, PROTOCOL_ID,
 };
@@ -74,21 +75,61 @@ pub fn client(main: bool) {
             |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
         )
         .add_systems(Startup, (startup, start_client_networking))
+        .add_systems(Update, (player_blueprint,))
         .add_systems(
-            Update,
+            NetworkPreUpdate,
             (
-                player_blueprint,
+                copy_input_for_tick.run_if(not_resimulating),
+                // TODO: If resimulating, copy over the ActionState from ActionHistory
+                copy_input_from_history.run_if(resource_exists::<Resimulating>()),
                 send_client_messages.run_if(client_connected()),
             ),
         )
-        .add_systems(NetworkPreUpdate, copy_input_for_tick)
         .add_systems(NetworkUpdate, handle_input)
         .add_systems(NetworkBlueprint, player_blueprint)
         .run();
 }
 
-fn copy_input_for_tick(tick: Res<NetworkTick>, inputs: Query<&ActionState<Action>, With<Control>>) {
+#[derive(Debug, Component, Serialize, Deserialize, Clone, Default)]
+pub struct ActionHistory {
+    pub tick: NetworkTick,
+    pub history: VecDeque<ActionState<Action>>,
+}
 
+impl ActionHistory {
+    pub fn add_for_tick(&mut self, tick: NetworkTick, actions: ActionState<Action>) {
+        self.tick = tick;
+        self.history.push_front(actions);
+    }
+
+    pub fn at_tick(&self, at: NetworkTick) -> Option<ActionState<Action>> {
+        if self.tick < at {
+            return None;
+        }
+
+        self.history.get((self.tick.0 - at.0) as usize).cloned()
+    }
+
+    pub fn remove_old_history(&mut self, oldest: NetworkTick) {
+        let history_len = 1 + self.tick.0.saturating_sub(oldest.0);
+
+        while self.history.len() > history_len as usize {
+            self.history.pop_back();
+        }
+    }
+}
+
+fn copy_input_for_tick(
+    mut action_query: Query<(&ActionState<Action>, &mut ActionHistory), With<Control>>,
+    tick: Res<NetworkTick>,
+    last_server_tick: Option<Res<SyncedServerTick>>,
+) {
+    for (actions, mut history) in &mut action_query {
+        history.add_for_tick(*tick, actions.clone());
+        if let Some(last_server_tick) = last_server_tick.as_deref() {
+            history.remove_old_history(last_server_tick.tick);
+        }
+    }
 }
 
 #[derive(Actionlike, Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, TypePath)]
@@ -103,14 +144,15 @@ pub enum Action {
 pub struct ClientPacket {
     pub time: Duration,
     pub tick: NetworkTick,
-    pub actions: ActionState<Action>,
+    pub history: ActionHistory,
 }
 
 fn send_client_messages(
     mut client: ResMut<RenetClient>,
-    player: Query<&ActionState<Action>, (With<Player>, With<Control>)>,
+    history: Query<&ActionHistory, (With<Player>, With<Control>)>,
+    tick: Res<NetworkTick>,
 ) {
-    let Ok(actions) = player.get_single() else { return };
+    let Ok(history) = history.get_single() else { return };
 
     let time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -118,8 +160,8 @@ fn send_client_messages(
 
     let packet = ClientPacket {
         time,
-        tick: NetworkTick(0),
-        actions: actions.clone(),
+        tick: *tick,
+        history: history.clone(),
     };
 
     client.send_message(
@@ -153,6 +195,7 @@ fn player_blueprint(
 
         if in_control {
             commands.entity(other).insert((
+                Predict,
                 Control,
                 InputManagerBundle::<Action> {
                     action_state: default(),
@@ -163,6 +206,7 @@ fn player_blueprint(
                         (KeyCode::D, Action::Right),
                     ]),
                 },
+                ActionHistory::default(),
             ));
         }
     }
@@ -228,19 +272,4 @@ fn start_client_networking(
     commands.insert_resource(transport);
     commands.insert_resource(client);
     commands.insert_resource(ClientId(client_id));
-    //commands.spawn((
-    //    Player,
-    //    SpriteBundle {
-    //        sprite: Sprite {
-    //            color: if HOST.load(Ordering::Relaxed) {
-    //                Color::GREEN
-    //            } else {
-    //                Color::BLUE
-    //            },
-    //            custom_size: Some(Vec2::splat(100.0)),
-    //            ..default()
-    //        },
-    //        ..default()
-    //    },
-    //));
 }

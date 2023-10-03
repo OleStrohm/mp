@@ -4,10 +4,13 @@ use bevy::prelude::*;
 use bevy::utils::HashMap;
 use bevy_renet::renet::{ChannelConfig, ConnectionConfig, RenetClient, RenetServer, SendType};
 use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
+use leafwing_input_manager::prelude::ActionState;
 use serde::{Deserialize, Serialize};
 
+use crate::client::{ActionHistory, Action};
+
 use self::schedule::{
-    run_network_fixed, NetworkFixedTime, NetworkResimulate, NetworkScheduleOrder, NetworkUpdateTick,
+    run_network_fixed, NetworkFixedTime, NetworkResync, NetworkScheduleOrder, NetworkUpdateTick,
 };
 
 #[cfg(test)]
@@ -15,9 +18,31 @@ mod tests;
 
 pub mod schedule;
 
+// prediction?
+#[derive(Component, Clone, Copy)]
+pub struct Predict;
+
+#[derive(Debug, Resource, Default)]
+pub struct Resimulating;
+
+pub fn copy_input_from_history(
+    mut commands: Commands,
+    mut players: Query<(Entity, &mut ActionHistory)>,
+    tick: Res<NetworkTick>,
+) {
+    for (player, history) in &mut players {
+        let mut player = commands.entity(player);
+        player.remove::<ActionState<Action>>();
+
+        let Some(actions) = history.at_tick(*tick) else { continue };
+        player.insert(actions);
+    }
+}
+// end prediction?
+
 pub const PROTOCOL_ID: u64 = 7;
 
-#[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default, PartialOrd)]
 pub struct NetworkTick(pub u64);
 
 #[derive(Resource, Deref, DerefMut, Default)]
@@ -36,6 +61,13 @@ impl From<Channel> for u8 {
     fn from(channel: Channel) -> Self {
         channel as u8
     }
+}
+
+#[derive(Resource, Debug, Default, Clone)]
+pub struct SyncedServerTick {
+    //sent_at: Duration,
+    //received_at: Duration,
+    pub tick: NetworkTick,
 }
 
 #[derive(Debug, Component, Deref, DerefMut)]
@@ -96,12 +128,19 @@ impl Plugin for ReplicationPlugin {
                     .run_if(is_server),
             )
             .add_systems(NetworkUpdateTick, increment_tick)
-            .add_systems(NetworkResimulate, apply_deferred.after(CopyReplicated));
+            .add_systems(
+                NetworkResync,
+                (apply_deferred.after(CopyReplicated), reset_to_server_tick),
+            );
     }
 }
 
 fn increment_tick(mut tick: ResMut<NetworkTick>) {
     tick.0 += 1;
+}
+
+fn reset_to_server_tick(mut tick: ResMut<NetworkTick>, synced_server_tick: Res<SyncedServerTick>) {
+    *tick = synced_server_tick.tick;
 }
 
 #[derive(Debug, SystemSet, Clone, PartialEq, Eq, Hash)]
@@ -152,6 +191,8 @@ fn receive_updated_components(world: &mut World) {
 
     // Create the list of updates
     if let Some(packet) = packet {
+        world.insert_resource(SyncedServerTick { tick: packet.tick });
+
         for EntityUpdates { entity, updates } in packet.updates {
             for update in updates {
                 world.resource_scope::<ReplicationFunctions, ()>(|world, f| {
@@ -224,7 +265,7 @@ impl AppExt for App {
         update: impl Fn(&[u8]) -> T + Send + Sync + 'static,
     ) -> &mut Self {
         self.add_systems(
-            NetworkResimulate,
+            NetworkResync,
             copy_replicated_component::<T>.in_set(CopyReplicated),
         );
         self.world

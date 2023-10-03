@@ -1,11 +1,18 @@
+use std::time::Duration;
+
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
+use bevy_renet::renet::RenetClient;
+
+use crate::replicate::{NetworkTick, Resimulating, SyncedServerTick};
+
+use super::Replicate;
 
 #[derive(Debug, Resource, Deref, DerefMut)]
 pub struct NetworkFixedTime(pub FixedTime);
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NetworkResimulate;
+pub struct NetworkResync;
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NetworkBlueprint;
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
@@ -27,7 +34,6 @@ impl Default for NetworkScheduleOrder {
         Self {
             labels: vec![
                 Box::new(NetworkUpdateTick),
-                Box::new(NetworkResimulate),
                 Box::new(NetworkBlueprint),
                 Box::new(NetworkPreUpdate),
                 Box::new(NetworkUpdate),
@@ -39,14 +45,86 @@ impl Default for NetworkScheduleOrder {
 
 pub(super) fn run_network_fixed(world: &mut World) {
     let delta_time = world.resource::<Time>().delta();
-    let mut fixed_time = world.resource_mut::<NetworkFixedTime>();
-    fixed_time.tick(delta_time);
+    world.resource_mut::<NetworkFixedTime>().tick(delta_time);
+
+    if world.get_resource::<RenetClient>().is_some()
+        && world.get_resource::<NetworkTick>().is_some()
+        && world.is_resource_changed::<SyncedServerTick>()
+    {
+        let last_received_server_tick = world.resource::<SyncedServerTick>().tick.0;
+        let current_tick = world.resource::<NetworkTick>().0;
+        let rtt = world.resource::<RenetClient>().rtt();
+        let period = world
+            .resource_mut::<NetworkFixedTime>()
+            .period
+            .as_secs_f64();
+        let ahead_by = 4.0 * rtt;
+        let speed_up = (last_received_server_tick as f64 - current_tick as f64) * period + ahead_by;
+        //let current_elapsed = world.resource::<Time>().elapsed_seconds_f64();
+        //let should_be = current_elapsed + speed_up;
+        //println!(
+        //    "Tick {}: Last server tick ({}), and rtt is {:?}, so client should be {} ticks ahead",
+        //    current_tick,
+        //    last_received_server_tick,
+        //    rtt,
+        //    ahead_by / period,
+        //);
+        //println!(
+        //    "elapes is currently {current_elapsed}, but it should be {should_be}, so speeding it up by {speed_up}"
+        //);
+
+        world
+            .resource_mut::<NetworkFixedTime>()
+            .tick(Duration::from_secs_f64(speed_up.clamp(0.0, 2.0 * period)));
+    }
 
     world.resource_scope(|world, order: Mut<NetworkScheduleOrder>| {
+        if world.is_resource_changed::<SyncedServerTick>() && is_desynced(world) {
+            let current_tick = *world.resource::<NetworkTick>();
+            let synced_server_tick = world.resource::<SyncedServerTick>().tick;
+
+            world.run_schedule(NetworkResync);
+
+            if current_tick > synced_server_tick {
+                println!("Resimulating from {synced_server_tick:?} to {current_tick:?}");
+
+                *world.resource_mut::<NetworkTick>() = synced_server_tick;
+
+                world.init_resource::<Resimulating>();
+                while *world.resource::<NetworkTick>() != current_tick {
+                    for label in &order.labels {
+                        let _ = world.try_run_schedule(&**label);
+                    }
+                }
+                world.remove_resource::<Resimulating>();
+            }
+        }
+
         while world.resource_mut::<NetworkFixedTime>().expend().is_ok() {
             for label in &order.labels {
                 let _ = world.try_run_schedule(&**label);
             }
         }
     });
+}
+
+fn is_desynced(world: &mut World) -> bool {
+    let new_replicated_entities = world
+        .query_filtered::<(), Added<Replicate>>()
+        .iter(world)
+        .count();
+
+    if new_replicated_entities > 0 {
+        return true;
+    }
+
+    //for (tf, predicted_tf) in world.query_filtered::<(&Transform, &Replicated<Transform>), With<Predict>>().iter(world) {
+    //    tf.translation.abs_diff_eq(predicted_tf.translation, 0.01);
+    //}
+
+    true
+}
+
+pub fn not_resimulating(resimulating: Option<Res<Resimulating>>) -> bool {
+    resimulating.is_none()
 }
