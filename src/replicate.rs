@@ -4,10 +4,9 @@ use bevy::prelude::*;
 use bevy::utils::HashMap;
 use bevy_renet::renet::{ChannelConfig, ConnectionConfig, RenetClient, RenetServer, SendType};
 use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
-use leafwing_input_manager::prelude::ActionState;
 use serde::{Deserialize, Serialize};
 
-use crate::client::{ActionHistory, Action};
+use crate::player::ActionHistory;
 
 use self::schedule::{
     run_network_fixed, NetworkFixedTime, NetworkResync, NetworkScheduleOrder, NetworkUpdateTick,
@@ -32,7 +31,8 @@ pub fn copy_input_from_history(
 ) {
     for (player, history) in &mut players {
         let mut player = commands.entity(player);
-        player.remove::<ActionState<Action>>();
+        // TODO: This is actually wrong.
+        // player.remove::<ActionState<Action>>();
 
         let Some(actions) = history.at_tick(*tick) else { continue };
         player.insert(actions);
@@ -41,6 +41,9 @@ pub fn copy_input_from_history(
 // end prediction?
 
 pub const PROTOCOL_ID: u64 = 7;
+
+#[derive(Resource, Deref, DerefMut, Serialize, Deserialize, PartialEq)]
+pub struct ClientId(pub u64);
 
 #[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default, PartialOrd)]
 pub struct NetworkTick(pub u64);

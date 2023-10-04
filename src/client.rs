@@ -1,11 +1,9 @@
-use std::collections::VecDeque;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use bevy::audio::AudioPlugin;
 use bevy::prelude::*;
-use bevy::reflect::TypePath;
 use bevy::render::camera::ScalingMode;
 use bevy_renet::renet::transport::{ClientAuthentication, NetcodeClientTransport};
 use bevy_renet::renet::RenetClient;
@@ -14,19 +12,16 @@ use bevy_renet::RenetClientPlugin;
 use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::replicate::{schedule::*, Predict, Resimulating, SyncedServerTick, copy_input_from_history};
+use crate::player::{Action, ActionHistory, Control, Player, PlayerPlugin};
 use crate::replicate::{
-    AppExt, Channel, NetworkTick, ReplicationConnectionConfig, ReplicationPlugin, PROTOCOL_ID,
+    copy_input_from_history, schedule::*, ClientId, Resimulating, SyncedServerTick,
+};
+use crate::replicate::{
+    Channel, NetworkTick, ReplicationConnectionConfig, ReplicationPlugin, PROTOCOL_ID,
 };
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
 static HOST: AtomicBool = AtomicBool::new(false);
-
-#[derive(Resource, Deref, DerefMut, Serialize, Deserialize, PartialEq)]
-pub struct ClientId(pub u64);
-
-#[derive(Component, Serialize, Deserialize, Clone)]
-pub struct Control;
 
 pub fn client(main: bool) {
     println!("Starting client!");
@@ -66,57 +61,22 @@ pub fn client(main: bool) {
             NetcodeClientPlugin,
             SharedPlugin,
             ReplicationPlugin::with_step(FIXED_TIMESTEP),
-            InputManagerPlugin::<Action>::default(),
+            PlayerPlugin,
         ))
-        .replicate::<Control>()
-        .replicate::<Player>()
-        .replicate_with::<Transform>(
-            |component| bincode::serialize(&component.translation).unwrap(),
-            |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
-        )
         .add_systems(Startup, (startup, start_client_networking))
-        .add_systems(Update, (player_blueprint,))
         .add_systems(
             NetworkPreUpdate,
             (
-                copy_input_for_tick.run_if(not_resimulating),
-                // TODO: If resimulating, copy over the ActionState from ActionHistory
-                copy_input_from_history.run_if(resource_exists::<Resimulating>()),
+                (
+                    copy_input_for_tick.run_if(not_resimulating),
+                    copy_input_from_history.run_if(resource_exists::<Resimulating>()),
+                )
+                    .chain(),
                 send_client_messages.run_if(client_connected()),
             ),
         )
         .add_systems(NetworkUpdate, handle_input)
-        .add_systems(NetworkBlueprint, player_blueprint)
         .run();
-}
-
-#[derive(Debug, Component, Serialize, Deserialize, Clone, Default)]
-pub struct ActionHistory {
-    pub tick: NetworkTick,
-    pub history: VecDeque<ActionState<Action>>,
-}
-
-impl ActionHistory {
-    pub fn add_for_tick(&mut self, tick: NetworkTick, actions: ActionState<Action>) {
-        self.tick = tick;
-        self.history.push_front(actions);
-    }
-
-    pub fn at_tick(&self, at: NetworkTick) -> Option<ActionState<Action>> {
-        if self.tick < at {
-            return None;
-        }
-
-        self.history.get((self.tick.0 - at.0) as usize).cloned()
-    }
-
-    pub fn remove_old_history(&mut self, oldest: NetworkTick) {
-        let history_len = 1 + self.tick.0.saturating_sub(oldest.0);
-
-        while self.history.len() > history_len as usize {
-            self.history.pop_back();
-        }
-    }
 }
 
 fn copy_input_for_tick(
@@ -130,14 +90,6 @@ fn copy_input_for_tick(
             history.remove_old_history(last_server_tick.tick);
         }
     }
-}
-
-#[derive(Actionlike, Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, TypePath)]
-pub enum Action {
-    Up,
-    Down,
-    Left,
-    Right,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -168,48 +120,6 @@ fn send_client_messages(
         Channel::ReliableOrdered,
         bincode::serialize(&packet).unwrap(),
     );
-}
-
-#[derive(Component, Serialize, Deserialize)]
-pub struct Player {
-    pub color: Color,
-    pub controller: ClientId,
-}
-
-fn player_blueprint(
-    mut commands: Commands,
-    new_players: Query<(Entity, &Player), Added<Player>>,
-    client_id: Res<ClientId>,
-) {
-    for (other, player) in &new_players {
-        let color = player.color;
-        let in_control = player.controller == *client_id;
-        commands.entity(other).insert(SpriteBundle {
-            sprite: Sprite {
-                color,
-                custom_size: Some(Vec2::splat(1.0)),
-                ..default()
-            },
-            ..default()
-        });
-
-        if in_control {
-            commands.entity(other).insert((
-                Predict,
-                Control,
-                InputManagerBundle::<Action> {
-                    action_state: default(),
-                    input_map: InputMap::new([
-                        (KeyCode::W, Action::Up),
-                        (KeyCode::A, Action::Left),
-                        (KeyCode::S, Action::Down),
-                        (KeyCode::D, Action::Right),
-                    ]),
-                },
-                ActionHistory::default(),
-            ));
-        }
-    }
 }
 
 fn handle_input(mut players: Query<(&mut Transform, &ActionState<Action>), With<Player>>) {

@@ -86,7 +86,7 @@ pub(super) fn run_network_fixed(world: &mut World) {
             world.run_schedule(NetworkResync);
 
             if current_tick > synced_server_tick {
-                println!("Resimulating from {synced_server_tick:?} to {current_tick:?}");
+                //println!("Resimulating from {synced_server_tick:?} to {current_tick:?}");
 
                 *world.resource_mut::<NetworkTick>() = synced_server_tick;
 

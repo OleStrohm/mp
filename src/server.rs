@@ -10,11 +10,12 @@ use bevy_renet::transport::NetcodeServerPlugin;
 use bevy_renet::RenetServerPlugin;
 use leafwing_input_manager::prelude::ActionState;
 
-use crate::client::{Action, ActionHistory, ClientId, ClientPacket, Control, Player};
+use crate::client::ClientPacket;
+use crate::player::{Player, Action, PlayerPlugin};
 use crate::replicate::schedule::{NetworkFixedTime, NetworkPreUpdate, NetworkUpdate};
 use crate::replicate::{
-    copy_input_from_history, AppExt, Channel, NetworkTick, Replicate, ReplicationConnectionConfig,
-    ReplicationPlugin, PROTOCOL_ID,
+    copy_input_from_history, Channel, Replicate, ReplicationConnectionConfig,
+    ReplicationPlugin, PROTOCOL_ID, ClientId,
 };
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
@@ -31,13 +32,8 @@ pub fn server() {
             NetcodeServerPlugin,
             SharedPlugin,
             ReplicationPlugin::with_step(FIXED_TIMESTEP),
+            PlayerPlugin,
         ))
-        .replicate::<Control>()
-        .replicate::<Player>()
-        .replicate_with::<Transform>(
-            |component| bincode::serialize(&component.translation).unwrap(),
-            |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
-        )
         .init_resource::<Lobby>()
         .add_systems(Startup, start_server_networking)
         .add_systems(Update, spawn_avatar)
