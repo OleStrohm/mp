@@ -2332,6 +2332,7 @@ dependencies = [
  "bevy",
  "bevy_renet",
  "bincode",
+ "itertools",
  "leafwing-input-manager",
  "noise",
  "owo-colors",

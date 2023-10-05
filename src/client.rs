@@ -75,7 +75,6 @@ pub fn client(main: bool) {
                 send_client_messages.run_if(client_connected()),
             ),
         )
-        .add_systems(NetworkUpdate, handle_input)
         .run();
 }
 
@@ -120,26 +119,6 @@ fn send_client_messages(
         Channel::ReliableOrdered,
         bincode::serialize(&packet).unwrap(),
     );
-}
-
-fn handle_input(mut players: Query<(&mut Transform, &ActionState<Action>), With<Player>>) {
-    for (mut tf, actions) in &mut players {
-        let mut dir = Vec2::splat(0.0);
-        if actions.pressed(Action::Up) {
-            dir.y += 1.0;
-        }
-        if actions.pressed(Action::Down) {
-            dir.y -= 1.0;
-        }
-        if actions.pressed(Action::Left) {
-            dir.x -= 1.0;
-        }
-        if actions.pressed(Action::Right) {
-            dir.x += 1.0;
-        }
-
-        tf.translation += 6.0 * dir.extend(0.0) * FIXED_TIMESTEP;
-    }
 }
 
 fn startup(mut commands: Commands) {

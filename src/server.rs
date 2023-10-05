@@ -8,14 +8,13 @@ use bevy_renet::renet::transport::{NetcodeServerTransport, ServerAuthentication,
 use bevy_renet::renet::{RenetServer, ServerEvent};
 use bevy_renet::transport::NetcodeServerPlugin;
 use bevy_renet::RenetServerPlugin;
-use leafwing_input_manager::prelude::ActionState;
 
 use crate::client::ClientPacket;
-use crate::player::{Player, Action, PlayerPlugin};
-use crate::replicate::schedule::{NetworkFixedTime, NetworkPreUpdate, NetworkUpdate};
+use crate::player::{Player, PlayerPlugin};
+use crate::replicate::schedule::NetworkPreUpdate;
 use crate::replicate::{
-    copy_input_from_history, Channel, Replicate, ReplicationConnectionConfig,
-    ReplicationPlugin, PROTOCOL_ID, ClientId,
+    copy_input_from_history, Channel, ClientId, Replicate, ReplicationConnectionConfig,
+    ReplicationPlugin, PROTOCOL_ID,
 };
 use crate::shared::{SharedPlugin, FIXED_TIMESTEP};
 
@@ -37,11 +36,10 @@ pub fn server() {
         .init_resource::<Lobby>()
         .add_systems(Startup, start_server_networking)
         .add_systems(Update, spawn_avatar)
-        .add_systems(NetworkUpdate, (handle_input).chain())
         .add_systems(
             NetworkPreUpdate,
             (
-                receive_client_messages,
+                receive_client_messages.run_if(is_server),
                 apply_deferred,
                 copy_input_from_history,
                 apply_deferred,
@@ -49,6 +47,10 @@ pub fn server() {
                 .chain(),
         )
         .run();
+}
+
+fn is_server(server: Option<Res<RenetServer>>) -> bool {
+    server.is_some()
 }
 
 fn receive_client_messages(
@@ -64,29 +66,6 @@ fn receive_client_messages(
 
             commands.entity(client_entity).insert(history);
         }
-    }
-}
-
-fn handle_input(
-    mut players: Query<(&mut Transform, &ActionState<Action>), With<Player>>,
-    fixed_time: Res<NetworkFixedTime>,
-) {
-    for (mut tf, actions) in &mut players {
-        let mut dir = Vec2::splat(0.0);
-        if actions.pressed(Action::Up) {
-            dir.y += 1.0;
-        }
-        if actions.pressed(Action::Down) {
-            dir.y -= 1.0;
-        }
-        if actions.pressed(Action::Left) {
-            dir.x -= 1.0;
-        }
-        if actions.pressed(Action::Right) {
-            dir.x += 1.0;
-        }
-
-        tf.translation += 6.0 * dir.extend(0.0) * fixed_time.period.as_secs_f32();
     }
 }
 
