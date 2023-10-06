@@ -11,6 +11,7 @@ mod replicate;
 mod server;
 mod shared;
 mod player;
+pub mod transport;
 
 fn start_copy(arg: impl AsRef<OsStr>, prefix: impl Display) -> std::process::Child {
     let mut child = std::process::Command::new(std::env::args().next().unwrap())

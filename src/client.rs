@@ -67,13 +67,13 @@ pub fn client(main: bool) {
         .add_systems(
             NetworkPreUpdate,
             (
-                (
-                    copy_input_for_tick.run_if(not_resimulating),
-                    copy_input_from_history.run_if(resource_exists::<Resimulating>()),
-                )
-                    .chain(),
-                send_client_messages.run_if(client_connected()),
-            ),
+                copy_input_for_tick.run_if(not(resimulating)),
+                send_client_messages
+                    .run_if(client_connected())
+                    .run_if(not(resimulating)),
+                copy_input_from_history.run_if(resimulating),
+            )
+                .chain(),
         )
         .run();
 }

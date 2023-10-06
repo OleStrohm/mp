@@ -108,15 +108,15 @@ pub(super) fn run_network_fixed(world: &mut World) {
     });
 }
 
-fn is_desynced(world: &mut World) -> bool {
-    let new_replicated_entities = world
-        .query_filtered::<(), Added<Replicate>>()
-        .iter(world)
-        .count();
+fn is_desynced(_world: &mut World) -> bool {
+    //let new_replicated_entities = world
+    //    .query_filtered::<(), Added<Replicate>>()
+    //    .iter(world)
+    //    .count();
 
-    if new_replicated_entities > 0 {
-        return true;
-    }
+    //if new_replicated_entities > 0 {
+    //    return true;
+    //}
 
     //for (tf, predicted_tf) in world.query_filtered::<(&Transform, &Replicated<Transform>), With<Predict>>().iter(world) {
     //    tf.translation.abs_diff_eq(predicted_tf.translation, 0.01);
@@ -125,6 +125,6 @@ fn is_desynced(world: &mut World) -> bool {
     true
 }
 
-pub fn not_resimulating(resimulating: Option<Res<Resimulating>>) -> bool {
-    resimulating.is_none()
+pub fn resimulating(resimulating: Option<Res<Resimulating>>) -> bool {
+    resimulating.is_some()
 }

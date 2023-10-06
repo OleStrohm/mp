@@ -7,6 +7,7 @@ use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
 use serde::{Deserialize, Serialize};
 
 use crate::player::ActionHistory;
+use crate::transport::{MemoryClientPlugin, MemoryServerPlugin};
 
 use self::schedule::{
     run_network_fixed, NetworkFixedTime, NetworkResync, NetworkScheduleOrder, NetworkUpdateTick,
@@ -121,6 +122,7 @@ impl Plugin for ReplicationPlugin {
                 PreUpdate,
                 receive_updated_components
                     .after(NetcodeClientPlugin::update_system)
+                    .after(MemoryClientPlugin::update_system)
                     .run_if(is_client),
             )
             .add_systems(Update, run_network_fixed)
@@ -128,6 +130,7 @@ impl Plugin for ReplicationPlugin {
                 PostUpdate,
                 send_updated_components
                     .before(NetcodeServerPlugin::send_packets)
+                    .before(MemoryServerPlugin::send_packets)
                     .run_if(is_server),
             )
             .add_systems(NetworkUpdateTick, increment_tick)
