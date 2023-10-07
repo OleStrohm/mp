@@ -158,7 +158,7 @@ fn modified_same_entity() {
 }
 
 #[test]
-fn modified_same_entity_100_times() {
+fn stress_100() {
     for _ in 0..100 {
         modified_same_entity();
     }

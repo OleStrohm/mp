@@ -6,8 +6,6 @@ use bevy_renet::renet::RenetClient;
 
 use crate::replicate::{NetworkTick, Resimulating, SyncedServerTick};
 
-use super::Replicate;
-
 #[derive(Debug, Resource, Deref, DerefMut)]
 pub struct NetworkFixedTime(pub FixedTime);
 

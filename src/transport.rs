@@ -67,6 +67,7 @@ impl MemoryServerTransport {
             let packets = server.get_packets_to_send(client_id).unwrap();
 
             for packet in packets {
+                println!("Sending packet to client with size {}", packet.len());
                 if connection.get().sender.send(packet).is_err() {
                     self.disconnect_client(client_id, server);
                     break;
@@ -101,10 +102,17 @@ impl MemoryClientTransport {
     fn update(&mut self, client: &mut RenetClient) {
         let Some(ref mut connection) = self.connection else { return };
 
-        match connection.get().receiver.try_recv() {
-            Ok(packet) => client.process_packet(&packet),
-            Err(TryRecvError::Empty) => (),
-            Err(TryRecvError::Disconnected) => self.disconnect(client),
+        loop {
+            match connection.get().receiver.try_recv() {
+                Ok(packet) => {
+                    println!("Received packet on client {}", packet.len());
+                    client.process_packet(&packet);
+                    continue;
+                }
+                Err(TryRecvError::Empty) => (),
+                Err(TryRecvError::Disconnected) => self.disconnect(client),
+            }
+            break;
         }
     }
 
@@ -163,7 +171,10 @@ impl MemoryServerPlugin {
         transport.update(&mut server);
     }
 
-    pub fn send_packets(mut transport: ResMut<MemoryServerTransport>, mut server: ResMut<RenetServer>) {
+    pub fn send_packets(
+        mut transport: ResMut<MemoryServerTransport>,
+        mut server: ResMut<RenetServer>,
+    ) {
         transport.send_packets(&mut server);
     }
 
@@ -204,7 +215,10 @@ impl MemoryClientPlugin {
         transport.update(&mut client);
     }
 
-    pub fn send_packets(mut transport: ResMut<MemoryClientTransport>, mut client: ResMut<RenetClient>) {
+    pub fn send_packets(
+        mut transport: ResMut<MemoryClientTransport>,
+        mut client: ResMut<RenetClient>,
+    ) {
         transport.send_packets(&mut client);
     }
 
@@ -366,15 +380,16 @@ mod tests {
             server.broadcast_message(DefaultChannel::ReliableOrdered, vec![2]);
         });
         server.update();
+        server.update();
         client.update();
 
-        assert_eq!(client_received(&client), [[1], [2]]);
+        assert_eq!(client_received(&client), [[1], [2], [1], [2]]);
         assert_eq!(server_received(&server), []);
 
         server.update();
         client.update();
 
-        assert_eq!(client_received(&client), [[1], [2], [1], [2]]);
+        assert_eq!(client_received(&client), [[1], [2], [1], [2], [1], [2]]);
         assert_eq!(server_received(&server), []);
     }
 
@@ -499,7 +514,7 @@ mod tests {
             .clients_id()
             .is_empty());
 
-        assert_eq!(client_received(&client), [[0]]);
+        assert!(client_received(&client).is_empty());
 
         assert!(client.world.resource::<RenetClient>().is_disconnected());
         assert!(!client

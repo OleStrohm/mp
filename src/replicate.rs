@@ -32,8 +32,6 @@ pub fn copy_input_from_history(
 ) {
     for (player, history) in &mut players {
         let mut player = commands.entity(player);
-        // TODO: This is actually wrong.
-        // player.remove::<ActionState<Action>>();
 
         let Some(actions) = history.at_tick(*tick) else { continue };
         player.insert(actions);

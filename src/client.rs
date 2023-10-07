@@ -13,9 +13,7 @@ use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::player::{Action, ActionHistory, Control, Player, PlayerPlugin};
-use crate::replicate::{
-    copy_input_from_history, schedule::*, ClientId, Resimulating, SyncedServerTick,
-};
+use crate::replicate::{copy_input_from_history, schedule::*, ClientId, SyncedServerTick};
 use crate::replicate::{
     Channel, NetworkTick, ReplicationConnectionConfig, ReplicationPlugin, PROTOCOL_ID,
 };
