@@ -21,13 +21,10 @@ use owo_colors::OwoColorize;
 use crate::game::GamePlugin;
 use crate::replicate::{ClientId, ReplicationConnectionConfig, PROTOCOL_ID};
 
-//mod client;
 mod game;
 mod player;
 mod prediction;
 mod replicate;
-//mod server;
-mod shared;
 pub mod transport;
 
 static HOST: AtomicBool = AtomicBool::new(false);

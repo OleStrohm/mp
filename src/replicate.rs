@@ -290,6 +290,7 @@ pub fn is_client(client: Option<Res<RenetClient>>) -> bool {
     client.is_some()
 }
 
+#[allow(unused)]
 pub fn client_connected() -> impl Condition<()> {
     crate::transport::client_connected().or_else(bevy_renet::transport::client_connected())
 }
