@@ -9,7 +9,7 @@ use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::replicate::schedule::{NetworkBlueprint, NetworkFixedTime, NetworkUpdate};
-use crate::replicate::{AppExt, ClientId, NetworkTick, Predict};
+use crate::replicate::{AppExt, ClientId, NetworkTick};
 
 #[derive(Component, Serialize, Deserialize, Clone)]
 pub struct Control;
@@ -135,7 +135,6 @@ fn player_blueprint(
             commands
                 .entity(entity)
                 .insert((
-                    Predict,
                     Control,
                     InputManagerBundle::<Action> {
                         action_state: default(),

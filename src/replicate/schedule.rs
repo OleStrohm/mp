@@ -4,7 +4,8 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy_renet::renet::RenetClient;
 
-use crate::replicate::{NetworkTick, Resimulating, SyncedServerTick};
+use crate::prediction::{Resimulating, is_desynced};
+use crate::replicate::{NetworkTick, SyncedServerTick};
 
 #[derive(Debug, Resource, Deref, DerefMut)]
 pub struct NetworkFixedTime(pub FixedTime);
@@ -104,25 +105,4 @@ pub(super) fn run_network_fixed(world: &mut World) {
             }
         }
     });
-}
-
-fn is_desynced(_world: &mut World) -> bool {
-    //let new_replicated_entities = world
-    //    .query_filtered::<(), Added<Replicate>>()
-    //    .iter(world)
-    //    .count();
-
-    //if new_replicated_entities > 0 {
-    //    return true;
-    //}
-
-    //for (tf, predicted_tf) in world.query_filtered::<(&Transform, &Replicated<Transform>), With<Predict>>().iter(world) {
-    //    tf.translation.abs_diff_eq(predicted_tf.translation, 0.01);
-    //}
-
-    true
-}
-
-pub fn resimulating(resimulating: Option<Res<Resimulating>>) -> bool {
-    resimulating.is_some()
 }

@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy::utils::HashMap;
+use bevy_renet::renet::transport::NetcodeTransportError;
 use bevy_renet::renet::{ChannelConfig, ConnectionConfig, RenetClient, RenetServer, SendType};
 use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
 use serde::{Deserialize, Serialize};
 
-use crate::player::ActionHistory;
 use crate::transport::{MemoryClientPlugin, MemoryServerPlugin};
 
 use self::schedule::{
@@ -17,27 +17,6 @@ use self::schedule::{
 mod tests;
 
 pub mod schedule;
-
-// prediction?
-#[derive(Component, Clone, Copy)]
-pub struct Predict;
-
-#[derive(Debug, Resource, Default)]
-pub struct Resimulating;
-
-pub fn copy_input_from_history(
-    mut commands: Commands,
-    mut players: Query<(Entity, &mut ActionHistory)>,
-    tick: Res<NetworkTick>,
-) {
-    for (player, history) in &mut players {
-        let mut player = commands.entity(player);
-
-        let Some(actions) = history.at_tick(*tick) else { continue };
-        player.insert(actions);
-    }
-}
-// end prediction?
 
 pub const PROTOCOL_ID: u64 = 7;
 
@@ -56,6 +35,7 @@ pub struct Replicate;
 #[repr(u8)]
 pub enum Channel {
     Replication = 0,
+    ClientInput,
     ReliableOrdered,
 }
 
@@ -116,6 +96,7 @@ impl Plugin for ReplicationPlugin {
             .init_resource::<NetworkEntities>()
             .insert_resource(NetworkFixedTime(FixedTime::new_from_secs(self.0)))
             .insert_resource(ReplicationConnectionConfig(connection_config))
+            .add_systems(Update, panic_on_error_system)
             .add_systems(
                 PreUpdate,
                 receive_updated_components
@@ -185,15 +166,12 @@ fn send_updated_components(world: &mut World) {
 }
 
 fn receive_updated_components(world: &mut World) {
-    // receive from REPLICATION_CHANNEL
-
     let packet = world
         .resource_scope::<RenetClient, _>(|_, mut client| {
             client.receive_message(Channel::Replication)
         })
         .map(|msg| bincode::deserialize::<ReplicationPacket>(&msg).unwrap());
 
-    // Create the list of updates
     if let Some(packet) = packet {
         world.insert_resource(SyncedServerTick { tick: packet.tick });
 
@@ -242,6 +220,13 @@ fn serialize_all_components(world: &World, entity: Entity) -> EntityUpdates {
                 })
             })
             .collect(),
+    }
+}
+
+// If any error is found we just panic
+pub fn panic_on_error_system(mut renet_error: EventReader<NetcodeTransportError>) {
+    for e in renet_error.iter() {
+        panic!("{}", e);
     }
 }
 
@@ -301,10 +286,14 @@ impl AppExt for App {
     }
 }
 
-fn is_client(client: Option<Res<RenetClient>>) -> bool {
+pub fn is_client(client: Option<Res<RenetClient>>) -> bool {
     client.is_some()
 }
 
-fn is_server(server: Option<Res<RenetServer>>) -> bool {
+pub fn client_connected() -> impl Condition<()> {
+    crate::transport::client_connected().or_else(bevy_renet::transport::client_connected())
+}
+
+pub fn is_server(server: Option<Res<RenetServer>>) -> bool {
     server.is_some()
 }
