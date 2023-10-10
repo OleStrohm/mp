@@ -15,19 +15,24 @@ struct ReplNum(u32);
 
 fn create_apps() -> (App, App) {
     let mut server = App::new();
-    server.add_plugins((
-        MinimalPlugins,
-        RenetServerPlugin,
-        MemoryServerPlugin,
-        ReplicationPlugin::with_step(0.01),
-    ));
+    server
+        .add_plugins((
+            MinimalPlugins,
+            RenetServerPlugin,
+            MemoryServerPlugin,
+            ReplicationPlugin::new(0.01, TickStrategy::Manual),
+        ))
+        .insert_resource(TickStrategy::Manual);
+
     let mut client = App::new();
-    client.add_plugins((
-        MinimalPlugins,
-        RenetClientPlugin,
-        MemoryClientPlugin,
-        ReplicationPlugin::with_step(0.01),
-    ));
+    client
+        .add_plugins((
+            MinimalPlugins,
+            RenetClientPlugin,
+            MemoryClientPlugin,
+            ReplicationPlugin::new(0.01, TickStrategy::Manual),
+        ))
+        .insert_resource(TickStrategy::Manual);
 
     (server, client)
 }

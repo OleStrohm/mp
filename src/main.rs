@@ -2,15 +2,18 @@
 
 use std::ffi::OsStr;
 use std::fmt::Display;
+use std::io::{stdin, Write};
 use std::net::{SocketAddr, UdpSocket};
-use std::process::Stdio;
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
-use bevy::app::ScheduleRunnerPlugin;
+use bevy::app::{AppExit, ScheduleRunnerPlugin};
 use bevy::audio::AudioPlugin;
 use bevy::input::InputPlugin;
 use bevy::prelude::*;
+use bevy::utils::synccell::SyncCell;
 use bevy_renet::renet::transport::{
     ClientAuthentication, NetcodeClientTransport, NetcodeServerTransport, ServerAuthentication,
     ServerConfig,
@@ -29,9 +32,24 @@ pub mod transport;
 
 static HOST: AtomicBool = AtomicBool::new(false);
 
+fn main() {
+    match std::env::args().nth(1).as_deref() {
+        Some("server") => server(),
+        Some("client") => client(false, None),
+        Some("host") | None => {
+            let server = start_copy("server", "[Server]".green());
+            let player2 = start_copy("client", "[P2]".yellow());
+
+            client(true, Some((player2, server)));
+        }
+        _ => panic!("The first argument is nonsensical"),
+    }
+}
+
 fn start_copy(arg: impl AsRef<OsStr>, prefix: impl Display) -> std::process::Child {
     let mut child = std::process::Command::new(std::env::args().next().unwrap())
         .arg(arg)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -53,25 +71,21 @@ fn start_copy(arg: impl AsRef<OsStr>, prefix: impl Display) -> std::process::Chi
     child
 }
 
-fn main() {
-    match std::env::args().nth(1).as_deref() {
-        Some("server") => server(),
-        Some("client") => client(false),
-        Some("host") | None => {
-            let mut server = start_copy("server", "[Server]".green());
-            let mut player2 = start_copy("client", "[P2]".yellow());
-
-            client(true);
-
-            player2.kill().unwrap();
-            server.kill().unwrap();
-        }
-        _ => panic!("The first argument is nonsensical"),
-    }
+fn send_app_exit(child: &mut Child) {
+    write!(child.stdin.as_mut().unwrap(), "exit").unwrap()
 }
 
 pub fn server() {
     println!("Starting server!");
+
+    let (sender, receiver) = mpsc::channel();
+    let mut receiver = SyncCell::new(receiver);
+
+    std::thread::spawn(move || {
+        let mut buffer = String::new();
+        stdin().read_line(&mut buffer).unwrap();
+        sender.send(buffer).unwrap();
+    });
 
     App::new()
         .add_plugins((
@@ -80,6 +94,11 @@ pub fn server() {
             GamePlugin,
         ))
         .add_systems(Startup, start_server_networking)
+        .add_systems(Update, move |mut app_exit: EventWriter<AppExit>| {
+            if let Ok("exit") = receiver.get().try_recv().as_deref() {
+                app_exit.send(AppExit);
+            }
+        })
         .run();
 }
 
@@ -107,12 +126,21 @@ fn start_server_networking(
     commands.insert_resource(server);
 }
 
-pub fn client(main: bool) {
+pub fn client(main: bool, mut children: Option<(Child, Child)>) {
     println!("Starting client!");
     HOST.store(main, Ordering::Relaxed);
 
     let monitor_width = 2560.0;
     let monitor_height = 1440.0;
+
+    let (sender, receiver) = mpsc::channel();
+    let mut receiver = SyncCell::new(receiver);
+
+    std::thread::spawn(move || {
+        let mut buffer = String::new();
+        stdin().read_line(&mut buffer).unwrap();
+        sender.send(buffer).unwrap();
+    });
 
     App::new()
         .add_plugins((
@@ -144,6 +172,21 @@ pub fn client(main: bool) {
             GamePlugin,
         ))
         .add_systems(Startup, start_client_networking)
+        .add_systems(Update, move |mut app_exit: EventWriter<AppExit>| {
+            if let Ok("exit") = receiver.get().try_recv().as_deref() {
+                app_exit.send(AppExit);
+            }
+        })
+        .add_systems(Last, move |app_exit: EventReader<AppExit>| {
+            if !app_exit.is_empty() {
+                let Some((player2, server)) = children.as_mut() else { return };
+
+                send_app_exit(player2);
+                player2.wait().unwrap();
+                send_app_exit(server);
+                server.wait().unwrap();
+            }
+        })
         .run();
 }
 

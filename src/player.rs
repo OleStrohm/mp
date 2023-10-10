@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
@@ -9,7 +7,7 @@ use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::replicate::schedule::{NetworkBlueprint, NetworkFixedTime, NetworkUpdate};
-use crate::replicate::{AppExt, ClientId, NetworkTick};
+use crate::replicate::{AppExt, ClientId};
 
 #[derive(Component, Serialize, Deserialize, Clone)]
 pub struct Control;
@@ -22,6 +20,7 @@ pub struct Player {
 
 #[derive(Actionlike, Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, TypePath)]
 pub enum Action {
+    Main,
     Up,
     Down,
     Left,
@@ -132,20 +131,24 @@ fn player_blueprint(
         });
 
         if in_control {
+            let mut input_map = InputMap::default();
+            input_map
+                .insert_multiple([
+                    (KeyCode::W, Action::Up),
+                    (KeyCode::A, Action::Left),
+                    (KeyCode::S, Action::Down),
+                    (KeyCode::D, Action::Right),
+                ])
+                .insert_multiple([(MouseButton::Left, Action::Main)]);
+
             commands
                 .entity(entity)
                 .insert((
                     Control,
                     InputManagerBundle::<Action> {
                         action_state: default(),
-                        input_map: InputMap::new([
-                            (KeyCode::W, Action::Up),
-                            (KeyCode::A, Action::Left),
-                            (KeyCode::S, Action::Down),
-                            (KeyCode::D, Action::Right),
-                        ]),
+                        input_map,
                     },
-                    ActionHistory::default(),
                 ))
                 .with_children(|entity| {
                     entity.spawn(SpriteBundle {
@@ -157,35 +160,6 @@ fn player_blueprint(
                         ..default()
                     });
                 });
-        }
-    }
-}
-
-#[derive(Debug, Component, Serialize, Deserialize, Clone, Default)]
-pub struct ActionHistory {
-    pub tick: NetworkTick,
-    pub history: VecDeque<ActionState<Action>>,
-}
-
-impl ActionHistory {
-    pub fn add_for_tick(&mut self, tick: NetworkTick, actions: ActionState<Action>) {
-        self.tick = tick;
-        self.history.push_front(actions);
-    }
-
-    pub fn at_tick(&self, at: NetworkTick) -> Option<ActionState<Action>> {
-        if self.tick < at {
-            return None;
-        }
-
-        self.history.get((self.tick.0 - at.0) as usize).cloned()
-    }
-
-    pub fn remove_old_history(&mut self, oldest: NetworkTick) {
-        let history_len = 1 + self.tick.0.saturating_sub(oldest.0);
-
-        while self.history.len() > history_len as usize {
-            self.history.pop_back();
         }
     }
 }

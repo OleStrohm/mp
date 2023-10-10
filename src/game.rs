@@ -1,11 +1,13 @@
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
-use bevy_renet::{RenetServerPlugin, RenetClientPlugin};
 use bevy_renet::renet::ServerEvent;
-use bevy_renet::transport::{NetcodeServerPlugin, NetcodeClientPlugin};
+use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
+use bevy_renet::{RenetClientPlugin, RenetServerPlugin};
+use leafwing_input_manager::prelude::ActionState;
 
-use crate::player::{Player, PlayerPlugin};
+use crate::player::{Action, Player, PlayerPlugin};
 use crate::prediction::PredictionPlugin;
+use crate::replicate::schedule::NetworkUpdate;
 use crate::replicate::{is_server, ClientId, Replicate, ReplicationPlugin};
 
 pub const FIXED_TIMESTEP: f32 = 1.0 / 60.0;
@@ -20,11 +22,35 @@ impl Plugin for GamePlugin {
             RenetClientPlugin,
             NetcodeClientPlugin,
             ReplicationPlugin::with_step(FIXED_TIMESTEP),
-            PredictionPlugin,
+            PredictionPlugin::<Action>::default(),
             PlayerPlugin,
         ))
         .add_systems(Startup, spawn_camera)
-        .add_systems(Update, spawn_avatar.run_if(is_server));
+        //.add_systems(Update, read_stdin)
+        .add_systems(Update, spawn_avatar.run_if(is_server))
+        .add_systems(NetworkUpdate, spawn_block)
+        .add_systems(
+            NetworkUpdate,
+            |m: Query<&LittleMarker>, mut last: Local<usize>| {
+                let num_now = m.iter().count();
+                if *last != num_now {
+                    *last = num_now;
+                    println!("There are now {} markers", num_now);
+                }
+            },
+        );
+    }
+}
+
+#[derive(Component)]
+struct LittleMarker;
+
+fn spawn_block(mut commands: Commands, players: Query<&ActionState<Action>>) {
+    for actions in &players {
+        if actions.pressed(Action::Main) {
+            println!("Directly spawned a marker");
+            commands.spawn((Replicate, LittleMarker));
+        }
     }
 }
 

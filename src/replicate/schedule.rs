@@ -3,12 +3,26 @@ use std::time::Duration;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy_renet::renet::RenetClient;
+use itertools::Itertools;
 
-use crate::prediction::{Resimulating, is_desynced};
+use crate::prediction::{is_desynced, Resimulating};
 use crate::replicate::{NetworkTick, SyncedServerTick};
+
+use super::Replicate;
 
 #[derive(Debug, Resource, Deref, DerefMut)]
 pub struct NetworkFixedTime(pub FixedTime);
+
+#[derive(Resource)]
+pub struct DoTick;
+
+#[derive(Default, Resource, PartialEq, Eq, Clone, Copy)]
+pub enum TickStrategy {
+    #[default]
+    Automatic,
+    #[allow(unused)]
+    Manual,
+}
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NetworkResync;
@@ -88,6 +102,14 @@ pub(super) fn run_network_fixed(world: &mut World) {
                 //println!("Resimulating from {synced_server_tick:?} to {current_tick:?}");
 
                 *world.resource_mut::<NetworkTick>() = synced_server_tick;
+
+                let predicted_spawns = world
+                    .query_filtered::<Entity, With<Replicate>>()
+                    .iter_mut(world)
+                    .collect_vec();
+                for entity in predicted_spawns {
+                    world.despawn(entity);
+                }
 
                 world.init_resource::<Resimulating>();
                 while *world.resource::<NetworkTick>() != current_tick {

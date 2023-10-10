@@ -7,10 +7,12 @@ use bevy_renet::renet::{ChannelConfig, ConnectionConfig, RenetClient, RenetServe
 use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
 use serde::{Deserialize, Serialize};
 
+use crate::prediction::Resimulating;
 use crate::transport::{MemoryClientPlugin, MemoryServerPlugin};
 
 use self::schedule::{
-    run_network_fixed, NetworkFixedTime, NetworkResync, NetworkScheduleOrder, NetworkUpdateTick,
+    run_network_fixed, DoTick, NetworkFixedTime, NetworkResync, NetworkScheduleOrder,
+    NetworkUpdateTick, TickStrategy,
 };
 
 #[cfg(test)]
@@ -58,11 +60,25 @@ pub struct Replicated<T>(pub T);
 #[derive(Resource, Deref, DerefMut, Default, Clone)]
 pub struct ReplicationConnectionConfig(pub ConnectionConfig);
 
-pub struct ReplicationPlugin(f32);
+pub struct ReplicationPlugin {
+    period: f32,
+    tick_strategy: TickStrategy,
+}
 
+#[allow(unused)]
 impl ReplicationPlugin {
+    pub fn new(period: f32, tick_strategy: TickStrategy) -> Self {
+        ReplicationPlugin {
+            period,
+            tick_strategy,
+        }
+    }
+
     pub fn with_step(period: f32) -> Self {
-        ReplicationPlugin(period)
+        ReplicationPlugin {
+            period,
+            tick_strategy: TickStrategy::Automatic,
+        }
     }
 }
 
@@ -94,7 +110,8 @@ impl Plugin for ReplicationPlugin {
             .init_resource::<NetworkScheduleOrder>()
             .init_resource::<NetworkTick>()
             .init_resource::<NetworkEntities>()
-            .insert_resource(NetworkFixedTime(FixedTime::new_from_secs(self.0)))
+            .insert_resource(NetworkFixedTime(FixedTime::new_from_secs(self.period)))
+            .insert_resource(self.tick_strategy)
             .insert_resource(ReplicationConnectionConfig(connection_config))
             .add_systems(Update, panic_on_error_system)
             .add_systems(
@@ -120,8 +137,18 @@ impl Plugin for ReplicationPlugin {
     }
 }
 
-fn increment_tick(mut tick: ResMut<NetworkTick>) {
-    tick.0 += 1;
+fn increment_tick(
+    mut commands: Commands,
+    tick_strategy: Res<TickStrategy>,
+    mut tick: ResMut<NetworkTick>,
+    resimulating: Option<Res<Resimulating>>,
+    do_tick: Option<Res<DoTick>>,
+) {
+    if *tick_strategy == TickStrategy::Automatic || resimulating.is_some() {
+        tick.0 += 1;
+    } else if do_tick.is_some() {
+        commands.remove_resource::<DoTick>();
+    }
 }
 
 fn reset_to_server_tick(mut tick: ResMut<NetworkTick>, synced_server_tick: Res<SyncedServerTick>) {
