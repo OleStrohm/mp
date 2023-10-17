@@ -1,14 +1,13 @@
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy_renet::renet::ServerEvent;
-use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
-use bevy_renet::{RenetClientPlugin, RenetServerPlugin};
 use leafwing_input_manager::prelude::ActionState;
+use serde::{Deserialize, Serialize};
 
 use crate::player::{Action, Player, PlayerPlugin};
 use crate::prediction::PredictionPlugin;
-use crate::replicate::schedule::NetworkUpdate;
-use crate::replicate::{is_server, ClientId, Replicate, ReplicationPlugin};
+use crate::replicate::schedule::{NetworkBlueprint, NetworkUpdate};
+use crate::replicate::{is_server, AppExt, ClientId, Replicate, ReplicationPlugin};
 
 pub const FIXED_TIMESTEP: f32 = 1.0 / 60.0;
 
@@ -17,39 +16,47 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            RenetServerPlugin,
-            NetcodeServerPlugin,
-            RenetClientPlugin,
-            NetcodeClientPlugin,
             ReplicationPlugin::with_step(FIXED_TIMESTEP),
             PredictionPlugin::<Action>::default(),
             PlayerPlugin,
         ))
+        .replicate::<Block>()
         .add_systems(Startup, spawn_camera)
-        //.add_systems(Update, read_stdin)
         .add_systems(Update, spawn_avatar.run_if(is_server))
-        .add_systems(NetworkUpdate, spawn_block)
-        .add_systems(
-            NetworkUpdate,
-            |m: Query<&LittleMarker>, mut last: Local<usize>| {
-                let num_now = m.iter().count();
-                if *last != num_now {
-                    *last = num_now;
-                    println!("There are now {} markers", num_now);
-                }
-            },
-        );
+        .add_systems(NetworkBlueprint, block_blueprint)
+        .add_systems(NetworkUpdate, spawn_block);
     }
 }
 
-#[derive(Component)]
-struct LittleMarker;
+#[derive(Component, Serialize, Deserialize)]
+struct Block {
+    pos: Vec3,
+}
+
+fn block_blueprint(mut commands: Commands, new_blocks: Query<(Entity, &Block), Added<Block>>) {
+    for (entity, block) in &new_blocks {
+        commands.entity(entity).insert(SpriteBundle {
+            sprite: Sprite {
+                color: Color::GRAY,
+                ..default()
+            },
+            transform: Transform::from_translation(block.pos),
+            ..default()
+        });
+    }
+}
 
 fn spawn_block(mut commands: Commands, players: Query<&ActionState<Action>>) {
     for actions in &players {
-        if actions.pressed(Action::Main) {
-            println!("Directly spawned a marker");
-            commands.spawn((Replicate, LittleMarker));
+        if actions.just_pressed(Action::Main) {
+            if let Some(pos) = actions.axis_pair(Action::Main) {
+                commands.spawn((
+                    Replicate,
+                    Block {
+                        pos: pos.xy().extend(0.0),
+                    },
+                ));
+            }
         }
     }
 }

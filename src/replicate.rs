@@ -5,14 +5,14 @@ use bevy::utils::HashMap;
 use bevy_renet::renet::transport::NetcodeTransportError;
 use bevy_renet::renet::{ChannelConfig, ConnectionConfig, RenetClient, RenetServer, SendType};
 use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
+use bevy_renet::{RenetClientPlugin, RenetServerPlugin};
 use serde::{Deserialize, Serialize};
 
-use crate::prediction::Resimulating;
 use crate::transport::{MemoryClientPlugin, MemoryServerPlugin};
 
 use self::schedule::{
-    run_network_fixed, DoTick, NetworkFixedTime, NetworkResync, NetworkScheduleOrder,
-    NetworkUpdateTick, TickStrategy,
+    run_network_fixed, NetworkFixedTime, NetworkResync, NetworkScheduleOrder, NetworkUpdateTick,
+    TickStrategy,
 };
 
 #[cfg(test)]
@@ -57,15 +57,11 @@ pub struct SyncedServerTick {
 #[derive(Debug, Component, Deref, DerefMut)]
 pub struct Replicated<T>(pub T);
 
-#[derive(Resource, Deref, DerefMut, Default, Clone)]
-pub struct ReplicationConnectionConfig(pub ConnectionConfig);
-
 pub struct ReplicationPlugin {
     period: f32,
     tick_strategy: TickStrategy,
 }
 
-#[allow(unused)]
 impl ReplicationPlugin {
     pub fn new(period: f32, tick_strategy: TickStrategy) -> Self {
         ReplicationPlugin {
@@ -75,83 +71,61 @@ impl ReplicationPlugin {
     }
 
     pub fn with_step(period: f32) -> Self {
-        ReplicationPlugin {
-            period,
-            tick_strategy: TickStrategy::Automatic,
-        }
+        ReplicationPlugin::new(period, TickStrategy::Automatic)
     }
 }
 
 impl Plugin for ReplicationPlugin {
     fn build(&self, app: &mut App) {
-        let channels = vec![
-            ChannelConfig {
-                channel_id: Channel::Replication as u8,
-                max_memory_usage_bytes: 5 * 1024 * 1024,
-                send_type: SendType::ReliableOrdered {
-                    resend_time: Duration::from_millis(300),
-                },
-            },
-            ChannelConfig {
-                channel_id: Channel::ReliableOrdered as u8,
-                max_memory_usage_bytes: 5 * 1024 * 1024,
-                send_type: SendType::ReliableOrdered {
-                    resend_time: Duration::from_millis(300),
-                },
-            },
-        ];
-        let connection_config = ConnectionConfig {
-            server_channels_config: channels.clone(),
-            client_channels_config: channels,
-            ..default()
-        };
-
-        app.init_resource::<ReplicationFunctions>()
-            .init_resource::<NetworkScheduleOrder>()
-            .init_resource::<NetworkTick>()
-            .init_resource::<NetworkEntities>()
-            .insert_resource(NetworkFixedTime(FixedTime::new_from_secs(self.period)))
-            .insert_resource(self.tick_strategy)
-            .insert_resource(ReplicationConnectionConfig(connection_config))
-            .add_systems(Update, panic_on_error_system)
-            .add_systems(
-                PreUpdate,
-                receive_updated_components
-                    .after(NetcodeClientPlugin::update_system)
-                    .after(MemoryClientPlugin::update_system)
-                    .run_if(is_client),
-            )
-            .add_systems(Update, run_network_fixed)
-            .add_systems(
-                PostUpdate,
-                send_updated_components
-                    .before(NetcodeServerPlugin::send_packets)
-                    .before(MemoryServerPlugin::send_packets)
-                    .run_if(is_server),
-            )
-            .add_systems(NetworkUpdateTick, increment_tick)
-            .add_systems(
-                NetworkResync,
-                (apply_deferred.after(CopyReplicated), reset_to_server_tick),
-            );
+        app.add_plugins((
+            RenetServerPlugin,
+            RenetClientPlugin,
+            NetcodeServerPlugin,
+            NetcodeClientPlugin,
+        ))
+        .init_resource::<ReplicationFunctions>()
+        .init_resource::<NetworkScheduleOrder>()
+        .init_resource::<NetworkTick>()
+        .init_resource::<NetworkEntities>()
+        .insert_resource(NetworkFixedTime(FixedTime::new_from_secs(self.period)))
+        .insert_resource(self.tick_strategy)
+        .add_systems(Update, panic_on_error_system)
+        .add_systems(
+            PreUpdate,
+            receive_updated_components
+                .after(NetcodeClientPlugin::update_system)
+                .after(MemoryClientPlugin::update_system)
+                .run_if(is_client),
+        )
+        .add_systems(Update, run_network_fixed)
+        .add_systems(
+            PostUpdate,
+            send_updated_components
+                .before(NetcodeServerPlugin::send_packets)
+                .before(MemoryServerPlugin::send_packets)
+                .run_if(is_server),
+        )
+        .add_systems(NetworkUpdateTick, increment_tick)
+        .add_systems(
+            NetworkResync,
+            (apply_deferred.after(CopyReplicated), reset_to_server_tick),
+        );
     }
 }
 
-fn increment_tick(
+fn increment_tick(mut tick: ResMut<NetworkTick>) {
+    tick.0 += 1;
+}
+
+fn reset_to_server_tick(
     mut commands: Commands,
-    tick_strategy: Res<TickStrategy>,
+    predicted_spawns: Query<Entity, With<Replicate>>,
     mut tick: ResMut<NetworkTick>,
-    resimulating: Option<Res<Resimulating>>,
-    do_tick: Option<Res<DoTick>>,
+    synced_server_tick: Res<SyncedServerTick>,
 ) {
-    if *tick_strategy == TickStrategy::Automatic || resimulating.is_some() {
-        tick.0 += 1;
-    } else if do_tick.is_some() {
-        commands.remove_resource::<DoTick>();
+    for entity in &predicted_spawns {
+        commands.entity(entity).despawn_recursive();
     }
-}
-
-fn reset_to_server_tick(mut tick: ResMut<NetworkTick>, synced_server_tick: Res<SyncedServerTick>) {
     *tick = synced_server_tick.tick;
 }
 
@@ -193,13 +167,12 @@ fn send_updated_components(world: &mut World) {
 }
 
 fn receive_updated_components(world: &mut World) {
-    let packet = world
+    while let Some(packet) = world
         .resource_scope::<RenetClient, _>(|_, mut client| {
             client.receive_message(Channel::Replication)
         })
-        .map(|msg| bincode::deserialize::<ReplicationPacket>(&msg).unwrap());
-
-    if let Some(packet) = packet {
+        .map(|msg| bincode::deserialize::<ReplicationPacket>(&msg).unwrap())
+    {
         world.insert_resource(SyncedServerTick { tick: packet.tick });
 
         for EntityUpdates { entity, updates } in packet.updates {
@@ -310,6 +283,31 @@ impl AppExt for App {
                 }),
             });
         self
+    }
+}
+
+pub fn replication_connection_config() -> ConnectionConfig {
+    let channels = vec![
+        ChannelConfig {
+            channel_id: Channel::Replication as u8,
+            max_memory_usage_bytes: 5 * 1024 * 1024,
+            send_type: SendType::ReliableOrdered {
+                resend_time: Duration::from_millis(300),
+            },
+        },
+        ChannelConfig {
+            channel_id: Channel::ReliableOrdered as u8,
+            max_memory_usage_bytes: 5 * 1024 * 1024,
+            send_type: SendType::ReliableOrdered {
+                resend_time: Duration::from_millis(300),
+            },
+        },
+    ];
+
+    ConnectionConfig {
+        server_channels_config: channels.clone(),
+        client_channels_config: channels,
+        ..default()
     }
 }
 

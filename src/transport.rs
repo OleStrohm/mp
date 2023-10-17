@@ -49,13 +49,18 @@ impl MemoryServerTransport {
         }
 
         for (&client_id, connection) in self.connections.iter_mut() {
-            match connection.get().receiver.try_recv() {
-                Ok(packet) => server.process_packet_from(&packet, client_id).unwrap(),
-                Err(TryRecvError::Empty) => (),
-                Err(TryRecvError::Disconnected) => {
-                    self.disconnect_client(client_id, server);
-                    break;
+            loop {
+                match connection.get().receiver.try_recv() {
+                    Ok(packet) => {
+                        server.process_packet_from(&packet, client_id).unwrap();
+                        continue
+                    },
+                    Err(TryRecvError::Empty) => (),
+                    Err(TryRecvError::Disconnected) => {
+                        //self.disconnect_client(client_id, server);
+                    }
                 }
+                break;
             }
         }
     }
@@ -67,7 +72,6 @@ impl MemoryServerTransport {
             let packets = server.get_packets_to_send(client_id).unwrap();
 
             for packet in packets {
-                println!("Sending packet to client with size {}", packet.len());
                 if connection.get().sender.send(packet).is_err() {
                     self.disconnect_client(client_id, server);
                     break;
@@ -100,12 +104,13 @@ impl MemoryClientTransport {
     }
 
     fn update(&mut self, client: &mut RenetClient) {
-        let Some(ref mut connection) = self.connection else { return };
+        let Some(ref mut connection) = self.connection else {
+            return;
+        };
 
         loop {
             match connection.get().receiver.try_recv() {
                 Ok(packet) => {
-                    println!("Received packet on client {}", packet.len());
                     client.process_packet(&packet);
                     continue;
                 }
@@ -120,7 +125,9 @@ impl MemoryClientTransport {
         let packets = client.get_packets_to_send();
 
         for packet in packets {
-            let Some(ref mut connection) = self.connection else { continue };
+            let Some(ref mut connection) = self.connection else {
+                continue;
+            };
 
             if connection.get().sender.send(packet).is_err() {
                 self.disconnect(client);
@@ -316,7 +323,6 @@ mod tests {
                         while let Some(packet) =
                             server.receive_message(client_id, DefaultChannel::ReliableOrdered)
                         {
-                            println!("Received {packet:?} from {client_id}");
                             received.push((client_id, packet.to_vec()));
                         }
                     }

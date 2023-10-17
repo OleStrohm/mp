@@ -1,13 +1,18 @@
 use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
+use bevy::window::PrimaryWindow;
 use bevy_renet::RenetClientPlugin;
 use itertools::multizip;
+use leafwing_input_manager::axislike::DualAxisData;
 use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::replicate::schedule::{NetworkBlueprint, NetworkFixedTime, NetworkUpdate};
-use crate::replicate::{AppExt, ClientId};
+use crate::prediction::{resimulating, CommitActions};
+use crate::replicate::schedule::{
+    NetworkBlueprint, NetworkFixedTime, NetworkPreUpdate, NetworkUpdate,
+};
+use crate::replicate::{is_client, AppExt, ClientId};
 
 #[derive(Component, Serialize, Deserialize, Clone)]
 pub struct Control;
@@ -49,8 +54,33 @@ impl Plugin for PlayerPlugin {
                 )
                     .chain(),
             )
+            .add_systems(
+                NetworkPreUpdate,
+                update_mouse_pos
+                    .run_if(is_client)
+                    .run_if(not(resimulating))
+                    .before(CommitActions),
+            )
             .add_systems(NetworkUpdate, (handle_input).chain());
     }
+}
+
+fn update_mouse_pos(
+    mut action_query: Query<&mut ActionState<Action>, With<Control>>,
+    camera: Query<(&Camera, &GlobalTransform)>,
+    window: Query<&Window, With<PrimaryWindow>>,
+) {
+    let (camera, camera_tf) = camera.single();
+    let window = window.single();
+
+    if let Some(m_pos) = window
+        .cursor_position()
+        .and_then(|p| camera.viewport_to_world_2d(camera_tf, p))
+    {
+        for mut actions in &mut action_query {
+            actions.action_data_mut(Action::Main).axis_pair = Some(DualAxisData::from_xy(m_pos));
+        }
+    };
 }
 
 fn handle_input(

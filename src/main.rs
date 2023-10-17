@@ -22,13 +22,17 @@ use bevy_renet::renet::{RenetClient, RenetServer};
 use owo_colors::OwoColorize;
 
 use crate::game::GamePlugin;
-use crate::replicate::{ClientId, ReplicationConnectionConfig, PROTOCOL_ID};
+use crate::replicate::{ClientId, PROTOCOL_ID};
+
+use self::replicate::replication_connection_config;
 
 mod game;
 mod player;
 mod prediction;
 mod replicate;
 pub mod transport;
+#[cfg(test)]
+mod test_utils;
 
 static HOST: AtomicBool = AtomicBool::new(false);
 
@@ -102,11 +106,8 @@ pub fn server() {
         .run();
 }
 
-fn start_server_networking(
-    mut commands: Commands,
-    connection_config: Res<ReplicationConnectionConfig>,
-) {
-    let server = RenetServer::new(connection_config.0.clone());
+fn start_server_networking(mut commands: Commands) {
+    let server = RenetServer::new(replication_connection_config());
 
     let current_time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -179,7 +180,9 @@ pub fn client(main: bool, mut children: Option<(Child, Child)>) {
         })
         .add_systems(Last, move |app_exit: EventReader<AppExit>| {
             if !app_exit.is_empty() {
-                let Some((player2, server)) = children.as_mut() else { return };
+                let Some((player2, server)) = children.as_mut() else {
+                    return;
+                };
 
                 send_app_exit(player2);
                 player2.wait().unwrap();
@@ -190,11 +193,8 @@ pub fn client(main: bool, mut children: Option<(Child, Child)>) {
         .run();
 }
 
-fn start_client_networking(
-    mut commands: Commands,
-    connection_config: Res<ReplicationConnectionConfig>,
-) {
-    let client = RenetClient::new(connection_config.0.clone());
+fn start_client_networking(mut commands: Commands) {
+    let client = RenetClient::new(replication_connection_config());
 
     let current_time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)

@@ -6,8 +6,12 @@ use crate::replicate::schedule::NetworkPreUpdate;
 use crate::replicate::{Channel, NetworkEntities, NetworkTick, SyncedServerTick};
 use bevy::prelude::*;
 use bevy_renet::renet::{RenetClient, RenetServer};
+use leafwing_input_manager::buttonlike::ButtonState;
 use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Resource, Default)]
 pub struct Resimulating;
@@ -15,9 +19,7 @@ pub struct Resimulating;
 pub struct PredictionPlugin<A>(PhantomData<A>);
 
 #[derive(Debug, SystemSet, Clone, PartialEq, Eq, Hash)]
-pub struct SendClientInput;
-#[derive(Debug, SystemSet, Clone, PartialEq, Eq, Hash)]
-pub struct ReceiveClientInput;
+pub struct CommitActions;
 
 impl<A: Actionlike + Serialize + for<'a> Deserialize<'a> + Send + Sync + 'static> Plugin
     for PredictionPlugin<A>
@@ -35,7 +37,8 @@ impl<A: Actionlike + Serialize + for<'a> Deserialize<'a> + Send + Sync + 'static
                     ),
                 )
                     .chain()
-                    .run_if(not(resimulating)),
+                    .run_if(not(resimulating))
+                    .in_set(CommitActions),
                 copy_input_from_history::<A>.run_if(resimulating),
                 (
                     receive_client_input::<A>,
@@ -100,9 +103,24 @@ fn copy_input_for_tick<A: Actionlike + Send + Sync + 'static>(
     for (entity, actions, history) in &mut action_query {
         match history {
             Some(mut history) => {
-                history.add_for_tick(*tick, actions.clone());
+                let mut actions = actions.clone();
+                let prev_actions = history.history.front().unwrap().clone();
 
-                let Some(last_server_tick) = last_server_tick.as_deref() else { continue };
+                for a in actions.get_pressed() {
+                    if !prev_actions.pressed(a.clone()) {
+                        actions.action_data_mut(a).state = ButtonState::JustPressed;
+                    }
+                }
+                for a in actions.get_released() {
+                    if !prev_actions.released(a.clone()) {
+                        actions.action_data_mut(a.clone()).state = ButtonState::JustReleased;
+                    }
+                }
+                history.add_for_tick(*tick, actions);
+
+                let Some(last_server_tick) = last_server_tick.as_deref() else {
+                    continue;
+                };
 
                 history.remove_old_history(last_server_tick.tick);
             }
@@ -129,7 +147,9 @@ fn send_client_input<A: Actionlike + Send + Sync + Serialize + 'static>(
     tick: Res<NetworkTick>,
     network_entities: Res<NetworkEntities>,
 ) {
-    let Ok((entity, history)) = history.get_single() else { return };
+    let Ok((entity, history)) = history.get_single() else {
+        return;
+    };
 
     let server_entity = *network_entities
         .iter()
@@ -170,7 +190,9 @@ pub fn copy_input_from_history<A: Actionlike + Send + Sync + 'static>(
     for (player, history) in &mut players {
         let mut player = commands.entity(player);
 
-        let Some(actions) = history.at_tick(*tick) else { continue };
+        let Some(actions) = history.at_tick(*tick) else {
+            continue;
+        };
         player.insert(actions);
     }
 }
