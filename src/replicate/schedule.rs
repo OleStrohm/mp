@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bevy::ecs::schedule::ScheduleLabel;
+use bevy::ecs::schedule::{ScheduleLabel, InternedScheduleLabel};
 use bevy::prelude::*;
 use bevy_renet::renet::RenetClient;
 use itertools::Itertools;
@@ -14,7 +14,7 @@ use super::Replicate;
 mod tests;
 
 #[derive(Debug, Resource, Deref, DerefMut)]
-pub struct NetworkFixedTime(pub FixedTime);
+pub struct NetworkFixedTime(pub Timer);
 
 #[derive(Resource)]
 pub struct DoTick;
@@ -40,20 +40,20 @@ pub struct NetworkUpdate;
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NetworkPostUpdate;
 
-#[derive(Resource, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Resource, Debug, PartialEq, Eq, Hash)]
 pub(super) struct NetworkScheduleOrder {
-    pub labels: Vec<Box<dyn ScheduleLabel>>,
+    pub labels: Vec<InternedScheduleLabel>,
 }
 
 impl Default for NetworkScheduleOrder {
     fn default() -> Self {
         Self {
             labels: vec![
-                Box::new(NetworkUpdateTick),
-                Box::new(NetworkBlueprint),
-                Box::new(NetworkPreUpdate),
-                Box::new(NetworkUpdate),
-                Box::new(NetworkPostUpdate),
+                NetworkUpdateTick.intern(),
+                NetworkBlueprint.intern(),
+                NetworkPreUpdate.intern(),
+                NetworkUpdate.intern(),
+                NetworkPostUpdate.intern(),
             ],
         }
     }
@@ -73,7 +73,7 @@ pub(super) fn run_network_fixed(world: &mut World) {
             let rtt = world.resource::<RenetClient>().rtt();
             let period = world
                 .resource_mut::<NetworkFixedTime>()
-                .period
+                .duration()
                 .as_secs_f64();
             let ahead_by = 4.0 * rtt;
             let speed_up =
@@ -120,24 +120,24 @@ pub(super) fn run_network_fixed(world: &mut World) {
                 world.init_resource::<Resimulating>();
                 while *world.resource::<NetworkTick>() != current_tick {
                     for label in &order.labels {
-                        let _ = world.try_run_schedule(&**label);
+                        let _ = world.try_run_schedule(*label);
                     }
                 }
                 world.remove_resource::<Resimulating>();
             }
         }
 
-        while should_run(world) {
+        for _ in 0..how_many_times_to_run(world) {
             for label in &order.labels {
-                let _ = world.try_run_schedule(&**label);
+                let _ = world.try_run_schedule(*label);
             }
         }
     });
 }
 
-fn should_run(world: &mut World) -> bool {
+fn how_many_times_to_run(world: &mut World) -> u32 {
     match *world.resource::<TickStrategy>() {
-        TickStrategy::Automatic => world.resource_mut::<NetworkFixedTime>().expend().is_ok(),
-        TickStrategy::Manual => world.remove_resource::<DoTick>().is_some(),
+        TickStrategy::Automatic => world.resource_mut::<NetworkFixedTime>().times_finished_this_tick(),
+        TickStrategy::Manual => world.remove_resource::<DoTick>().map(|_| 1).unwrap_or(0),
     }
 }

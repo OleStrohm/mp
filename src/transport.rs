@@ -5,7 +5,7 @@ use bevy::app::AppExit;
 use bevy::prelude::*;
 use bevy::utils::synccell::SyncCell;
 use bevy::utils::HashMap;
-use bevy_renet::renet::{RenetClient, RenetServer};
+use bevy_renet::renet::{RenetClient, RenetServer, ClientId};
 use bevy_renet::{RenetClientPlugin, RenetServerPlugin};
 
 struct Connection {
@@ -21,9 +21,9 @@ impl Connection {
 
 #[derive(Default, Resource)]
 pub struct MemoryServerTransport {
-    connections: HashMap<u64, SyncCell<Connection>>,
+    connections: HashMap<ClientId, SyncCell<Connection>>,
     num_connected: u64,
-    new_connections: Vec<u64>,
+    new_connections: Vec<ClientId>,
 }
 
 impl MemoryServerTransport {
@@ -31,7 +31,7 @@ impl MemoryServerTransport {
         let (send_to_client, receive_from_server) = mpsc::channel::<Vec<u8>>();
         let (send_to_server, receive_from_client) = mpsc::channel::<Vec<u8>>();
 
-        let client_id = self.num_connected;
+        let client_id = ClientId::from_raw(self.num_connected);
         self.num_connected += 1;
 
         self.connections.insert(
@@ -80,7 +80,7 @@ impl MemoryServerTransport {
         }
     }
 
-    fn disconnect_client(&mut self, client_id: u64, server: &mut RenetServer) {
+    fn disconnect_client(&mut self, client_id: ClientId, server: &mut RenetServer) {
         self.connections.remove(&client_id);
         server.disconnect(client_id);
     }
@@ -323,7 +323,7 @@ mod tests {
                         while let Some(packet) =
                             server.receive_message(client_id, DefaultChannel::ReliableOrdered)
                         {
-                            received.push((client_id, packet.to_vec()));
+                            received.push((client_id.raw(), packet.to_vec()));
                         }
                     }
                 },
@@ -469,7 +469,7 @@ mod tests {
         let mut client = create_client_app(&mut server);
 
         server.update();
-        assert_eq!(server.world.resource::<RenetServer>().clients_id(), vec![0]);
+        assert_eq!(server.world.resource::<RenetServer>().clients_id(), vec![ClientId::from_raw(0)]);
         assert!(client
             .world
             .resource::<MemoryClientTransport>()
@@ -504,7 +504,7 @@ mod tests {
 
         server.update();
 
-        assert_eq!(server.world.resource::<RenetServer>().clients_id(), [0]);
+        assert_eq!(server.world.resource::<RenetServer>().clients_id(), [ClientId::from_raw(0)]);
         assert!(client
             .world
             .resource::<MemoryClientTransport>()

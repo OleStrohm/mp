@@ -5,10 +5,8 @@ use bevy::utils::HashMap;
 use bevy_renet::renet::transport::NetcodeTransportError;
 use bevy_renet::renet::{ChannelConfig, ConnectionConfig, RenetClient, RenetServer, SendType};
 use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
-use bevy_renet::{RenetClientPlugin, RenetServerPlugin};
+use bevy_renet::{RenetClientPlugin, RenetReceive, RenetSend, RenetServerPlugin};
 use serde::{Deserialize, Serialize};
-
-use crate::transport::{MemoryClientPlugin, MemoryServerPlugin};
 
 use self::schedule::{
     run_network_fixed, NetworkFixedTime, NetworkResync, NetworkScheduleOrder, NetworkUpdateTick,
@@ -23,7 +21,7 @@ pub mod schedule;
 pub const PROTOCOL_ID: u64 = 7;
 
 #[derive(Resource, Deref, DerefMut, Serialize, Deserialize, PartialEq)]
-pub struct ClientId(pub u64);
+pub struct Owner(pub u64);
 
 #[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default, PartialOrd)]
 pub struct NetworkTick(pub u64);
@@ -87,23 +85,22 @@ impl Plugin for ReplicationPlugin {
         .init_resource::<NetworkScheduleOrder>()
         .init_resource::<NetworkTick>()
         .init_resource::<NetworkEntities>()
-        .insert_resource(NetworkFixedTime(FixedTime::new_from_secs(self.period)))
+        .insert_resource(NetworkFixedTime(Timer::from_seconds(
+            self.period,
+            TimerMode::Repeating,
+        )))
         .insert_resource(self.tick_strategy)
         .add_systems(Update, panic_on_error_system)
         .add_systems(
             PreUpdate,
             receive_updated_components
-                .after(NetcodeClientPlugin::update_system)
-                .after(MemoryClientPlugin::update_system)
+                .after(RenetReceive)
                 .run_if(is_client),
         )
         .add_systems(Update, run_network_fixed)
         .add_systems(
             PostUpdate,
-            send_updated_components
-                .before(NetcodeServerPlugin::send_packets)
-                .before(MemoryServerPlugin::send_packets)
-                .run_if(is_server),
+            send_updated_components.before(RenetSend).run_if(is_server),
         )
         .add_systems(NetworkUpdateTick, increment_tick)
         .add_systems(
@@ -225,7 +222,7 @@ fn serialize_all_components(world: &World, entity: Entity) -> EntityUpdates {
 
 // If any error is found we just panic
 pub fn panic_on_error_system(mut renet_error: EventReader<NetcodeTransportError>) {
-    for e in renet_error.iter() {
+    for e in renet_error.read() {
         panic!("{}", e);
     }
 }
@@ -313,11 +310,6 @@ pub fn replication_connection_config() -> ConnectionConfig {
 
 pub fn is_client(client: Option<Res<RenetClient>>) -> bool {
     client.is_some()
-}
-
-#[allow(unused)]
-pub fn client_connected() -> impl Condition<()> {
-    crate::transport::client_connected().or_else(bevy_renet::transport::client_connected())
 }
 
 pub fn is_server(server: Option<Res<RenetServer>>) -> bool {

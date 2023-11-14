@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::player::{Action, Player, PlayerPlugin};
 use crate::prediction::PredictionPlugin;
 use crate::replicate::schedule::{NetworkBlueprint, NetworkUpdate};
-use crate::replicate::{is_server, AppExt, ClientId, Replicate, ReplicationPlugin};
+use crate::replicate::{is_server, AppExt, Replicate, ReplicationPlugin, Owner};
 
 pub const FIXED_TIMESTEP: f32 = 1.0 / 60.0;
 
@@ -74,7 +74,7 @@ fn spawn_camera(mut commands: Commands) {
 }
 
 fn spawn_avatar(mut commands: Commands, mut events: EventReader<ServerEvent>) {
-    for event in &mut events {
+    for event in events.read() {
         match event {
             ServerEvent::ClientConnected { client_id } => {
                 let color = Color::rgb(rand::random(), rand::random(), rand::random());
@@ -85,7 +85,7 @@ fn spawn_avatar(mut commands: Commands, mut events: EventReader<ServerEvent>) {
                         Replicate,
                         Player {
                             color,
-                            controller: ClientId(*client_id),
+                            controller: Owner(client_id.raw()),
                         },
                         Transform::from_translation(pos.extend(0.0)),
                     ))

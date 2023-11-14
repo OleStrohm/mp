@@ -5,6 +5,7 @@ use crate::player::Control;
 use crate::replicate::schedule::NetworkPreUpdate;
 use crate::replicate::{Channel, NetworkEntities, NetworkTick, SyncedServerTick};
 use bevy::prelude::*;
+use bevy_renet::client_connected;
 use bevy_renet::renet::{RenetClient, RenetServer};
 use leafwing_input_manager::buttonlike::ButtonState;
 use leafwing_input_manager::prelude::*;
@@ -31,10 +32,7 @@ impl<A: Actionlike + Serialize + for<'a> Deserialize<'a> + Send + Sync + 'static
                 (
                     copy_input_for_tick::<A>,
                     apply_deferred,
-                    send_client_input::<A>.run_if(
-                        crate::transport::client_connected()
-                            .or_else(bevy_renet::transport::client_connected()),
-                    ),
+                    send_client_input::<A>.run_if(client_connected()),
                 )
                     .chain()
                     .run_if(not(resimulating))

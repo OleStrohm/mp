@@ -22,7 +22,7 @@ use bevy_renet::renet::{RenetClient, RenetServer};
 use owo_colors::OwoColorize;
 
 use crate::game::GamePlugin;
-use crate::replicate::{ClientId, PROTOCOL_ID};
+use crate::replicate::{Owner, PROTOCOL_ID};
 
 use self::replicate::replication_connection_config;
 
@@ -30,9 +30,9 @@ mod game;
 mod player;
 mod prediction;
 mod replicate;
-pub mod transport;
 #[cfg(test)]
 mod test_utils;
+pub mod transport;
 
 static HOST: AtomicBool = AtomicBool::new(false);
 
@@ -118,10 +118,11 @@ fn start_server_networking(mut commands: Commands) {
         max_clients: 64,
         protocol_id: PROTOCOL_ID,
         authentication: ServerAuthentication::Unsecure,
-        public_addr,
+        current_time,
+        public_addresses: vec![public_addr],
     };
 
-    let transport = NetcodeServerTransport::new(current_time, server_config, socket).unwrap();
+    let transport = NetcodeServerTransport::new(server_config, socket).unwrap();
 
     commands.insert_resource(transport);
     commands.insert_resource(server);
@@ -217,5 +218,5 @@ fn start_client_networking(mut commands: Commands) {
 
     commands.insert_resource(transport);
     commands.insert_resource(client);
-    commands.insert_resource(ClientId(client_id));
+    commands.insert_resource(Owner(client_id));
 }

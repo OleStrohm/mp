@@ -12,7 +12,7 @@ use crate::prediction::{resimulating, CommitActions};
 use crate::replicate::schedule::{
     NetworkBlueprint, NetworkFixedTime, NetworkPreUpdate, NetworkUpdate,
 };
-use crate::replicate::{is_client, AppExt, ClientId};
+use crate::replicate::{is_client, AppExt, Owner};
 
 #[derive(Component, Serialize, Deserialize, Clone)]
 pub struct Control;
@@ -20,7 +20,7 @@ pub struct Control;
 #[derive(Component, Serialize, Deserialize)]
 pub struct Player {
     pub color: Color,
-    pub controller: ClientId,
+    pub controller: Owner,
 }
 
 #[derive(Actionlike, Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, TypePath)]
@@ -49,7 +49,7 @@ impl Plugin for PlayerPlugin {
             .add_systems(
                 NetworkBlueprint,
                 (
-                    player_blueprint.run_if(resource_exists::<ClientId>()),
+                    player_blueprint.run_if(resource_exists::<Owner>()),
                     apply_deferred,
                 )
                     .chain(),
@@ -108,7 +108,7 @@ fn handle_input(
                 dir.x += 1.0;
             }
 
-            let movement = 6.0 * dir * fixed_time.period.as_secs_f32();
+            let movement = 6.0 * dir * fixed_time.duration().as_secs_f32();
 
             (e, tf.translation + movement.extend(0.0))
         })
@@ -145,7 +145,7 @@ fn handle_input(
 fn player_blueprint(
     mut commands: Commands,
     new_players: Query<(Entity, &Player), Added<Player>>,
-    client_id: Res<ClientId>,
+    client_id: Res<Owner>,
 ) {
     for (entity, player) in &new_players {
         let color = player.color;
@@ -187,6 +187,7 @@ fn player_blueprint(
                             custom_size: Some(Vec2::splat(1.05)),
                             ..default()
                         },
+                        transform: Transform::from_xyz(0.0, 0.0, -1.0),
                         ..default()
                     });
                 });
