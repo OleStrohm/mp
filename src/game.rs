@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::player::{Action, Player, PlayerPlugin};
 use crate::prediction::PredictionPlugin;
-use crate::replicate::schedule::{NetworkBlueprint, NetworkUpdate};
-use crate::replicate::{is_server, AppExt, Replicate, ReplicationPlugin, Owner};
+use crate::replicate::schedule::{NetworkBlueprint, NetworkFixedTime, NetworkUpdate};
+use crate::replicate::{is_server, AppExt, Owner, Replicate, ReplicationPlugin};
 
 pub const FIXED_TIMESTEP: f32 = 1.0 / 60.0;
 
@@ -21,10 +21,19 @@ impl Plugin for GamePlugin {
             PlayerPlugin,
         ))
         .replicate::<Block>()
+        .replicate::<Npc>()
+        .replicate::<Dir>()
         .add_systems(Startup, spawn_camera)
-        .add_systems(Update, spawn_avatar.run_if(is_server))
-        .add_systems(NetworkBlueprint, block_blueprint)
-        .add_systems(NetworkUpdate, spawn_block);
+        .add_systems(NetworkBlueprint, (block_blueprint, npc_blueprint))
+        .add_systems(
+            NetworkUpdate,
+            (
+                spawn_block,
+                spawn_avatar.run_if(is_server),
+                spawn_npc.run_if(is_server.and_then(run_once())),
+                npc_move,
+            ),
+        );
     }
 }
 
@@ -101,4 +110,61 @@ fn spawn_avatar(mut commands: Commands, mut events: EventReader<ServerEvent>) {
             }
         }
     }
+}
+
+#[derive(Debug, Component, Serialize, Deserialize)]
+struct Npc {
+    color: Color,
+    speed: f32,
+}
+
+#[derive(Debug, Component, Serialize, Deserialize)]
+enum Dir {
+    Left,
+    Right,
+}
+
+fn npc_move(mut npcs: Query<(&mut Transform, &mut Dir, &Npc)>, time: Res<NetworkFixedTime>) {
+    for (mut tf, mut dir, Npc { speed, .. }) in &mut npcs {
+        match *dir {
+            Dir::Left => {
+                tf.translation.x -= speed * time.duration().as_secs_f32();
+                if tf.translation.x <= -5.0 {
+                    *dir = Dir::Right;
+                }
+            }
+            Dir::Right => {
+                tf.translation.x += speed * time.duration().as_secs_f32();
+                if tf.translation.x >= 5.0 {
+                    *dir = Dir::Left;
+                }
+            }
+        }
+    }
+}
+
+fn npc_blueprint(mut commands: Commands, npcs: Query<(Entity, &Transform, &Npc), Without<Sprite>>) {
+    for (entity, &transform, &Npc { color, .. }) in &npcs {
+        commands.entity(entity).insert(SpriteBundle {
+            sprite: Sprite {
+                color,
+                custom_size: Some((1.0, 1.0).into()),
+                ..default()
+            },
+            transform,
+            ..default()
+        });
+    }
+}
+
+fn spawn_npc(mut commands: Commands) {
+    commands.spawn((
+        Replicate,
+        Npc {
+            color: Color::PURPLE,
+            speed: 5.0,
+        },
+        Dir::Left,
+        Transform::from_xyz(5.0, 0.0, -2.0),
+    ));
 }
