@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use bevy::app::{AppExit, ScheduleRunnerPlugin};
 use bevy::audio::AudioPlugin;
+use bevy::gizmos::GizmoPlugin;
 use bevy::input::InputPlugin;
 use bevy::prelude::*;
 use bevy::utils::synccell::SyncCell;
@@ -19,6 +20,7 @@ use bevy_renet::renet::transport::{
     ServerConfig,
 };
 use bevy_renet::renet::{RenetClient, RenetServer};
+use bevy_xpbd_2d::plugins::PhysicsDebugPlugin;
 use owo_colors::OwoColorize;
 
 use crate::game::GamePlugin;
@@ -172,6 +174,7 @@ pub fn client(main: bool, mut children: Option<(Child, Child)>) {
                 })
                 .disable::<AudioPlugin>(/* Disabled due to audio bug with pipewire */),
             GamePlugin,
+            PhysicsDebugPlugin::default(),
         ))
         .add_systems(Startup, start_client_networking)
         .add_systems(Update, move |mut app_exit: EventWriter<AppExit>| {

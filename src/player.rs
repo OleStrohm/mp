@@ -1,17 +1,13 @@
-use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy::window::PrimaryWindow;
 use bevy_renet::RenetClientPlugin;
-use itertools::multizip;
 use leafwing_input_manager::axislike::DualAxisData;
 use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::prediction::{resimulating, CommitActions};
-use crate::replicate::schedule::{
-    NetworkBlueprint, NetworkFixedTime, NetworkPreUpdate, NetworkUpdate,
-};
+use crate::replicate::schedule::{NetworkBlueprint, NetworkPreUpdate};
 use crate::replicate::{is_client, AppExt, Owner};
 
 #[derive(Component, Serialize, Deserialize, Clone)]
@@ -60,8 +56,7 @@ impl Plugin for PlayerPlugin {
                     .run_if(is_client)
                     .run_if(not(resimulating))
                     .before(CommitActions),
-            )
-            .add_systems(NetworkUpdate, (handle_input).chain());
+            );
     }
 }
 
@@ -81,65 +76,6 @@ fn update_mouse_pos(
             actions.action_data_mut(Action::Main).axis_pair = Some(DualAxisData::from_xy(m_pos));
         }
     };
-}
-
-fn handle_input(
-    mut players: ParamSet<(
-        Query<(Entity, &mut Transform, &ActionState<Action>), With<Player>>,
-        Query<(Entity, &Transform), With<Player>>,
-    )>,
-    fixed_time: Res<NetworkFixedTime>,
-) {
-    let new_position = players
-        .p0()
-        .iter()
-        .map(|(e, tf, actions)| {
-            let mut dir = Vec2::splat(0.0);
-            if actions.pressed(Action::Up) {
-                dir.y += 1.0;
-            }
-            if actions.pressed(Action::Down) {
-                dir.y -= 1.0;
-            }
-            if actions.pressed(Action::Left) {
-                dir.x -= 1.0;
-            }
-            if actions.pressed(Action::Right) {
-                dir.x += 1.0;
-            }
-
-            let movement = 6.0 * dir * fixed_time.duration().as_secs_f32();
-
-            (e, tf.translation + movement.extend(0.0))
-        })
-        .collect::<Vec<_>>();
-
-    let can_move = new_position
-        .iter()
-        .map(|(e, p)| {
-            players
-                .p1()
-                .iter()
-                .filter(|(other_entity, _)| e != other_entity)
-                .map(|(_, other_tf)| {
-                    let diff = p.xy() - other_tf.translation.xy();
-                    diff.to_array()
-                        .into_iter()
-                        .any(|distance| distance.abs() >= 1.0)
-                })
-                .all(|outside| outside)
-        })
-        .collect::<Vec<_>>();
-
-    for (mut tf, new_pos, can_move) in multizip((
-        players.p0().iter_mut().map(|(_, tf, _)| tf),
-        new_position.into_iter().map(|(_, p)| p),
-        can_move,
-    )) {
-        if can_move {
-            tf.translation = new_pos;
-        }
-    }
 }
 
 fn player_blueprint(
@@ -184,10 +120,10 @@ fn player_blueprint(
                     entity.spawn(SpriteBundle {
                         sprite: Sprite {
                             color: Color::GOLD,
-                            custom_size: Some(Vec2::splat(1.05)),
+                            custom_size: Some(Vec2::splat(0.3)),
                             ..default()
                         },
-                        transform: Transform::from_xyz(0.0, 0.0, -1.0),
+                        transform: Transform::from_xyz(0.0, 0.0, 1.0),
                         ..default()
                     });
                 });

@@ -1,37 +1,47 @@
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy_renet::renet::ServerEvent;
+use bevy_xpbd_2d::components::Collider;
+use bevy_xpbd_2d::plugins::PhysicsPlugins;
 use leafwing_input_manager::prelude::ActionState;
+use leafwing_input_manager::{Actionlike, InputManagerBundle};
 use serde::{Deserialize, Serialize};
 
 use crate::player::{Action, Player, PlayerPlugin};
 use crate::prediction::PredictionPlugin;
-use crate::replicate::schedule::{NetworkBlueprint, NetworkFixedTime, NetworkUpdate};
+use crate::replicate::schedule::{NetworkBlueprint, NetworkPreUpdate, NetworkUpdate};
 use crate::replicate::{is_server, AppExt, Owner, Replicate, ReplicationPlugin};
 
+use self::movables::MovablePlugin;
+
 pub const FIXED_TIMESTEP: f32 = 1.0 / 60.0;
+
+mod movables;
 
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            PhysicsPlugins::default(),
             ReplicationPlugin::with_step(FIXED_TIMESTEP),
             PredictionPlugin::<Action>::default(),
             PlayerPlugin,
+            MovablePlugin,
         ))
+        .init_resource::<GizmoConfig>()
         .replicate::<Block>()
         .replicate::<Npc>()
         .replicate::<Dir>()
         .add_systems(Startup, spawn_camera)
         .add_systems(NetworkBlueprint, (block_blueprint, npc_blueprint))
+        .add_systems(NetworkPreUpdate, npc_move)
         .add_systems(
             NetworkUpdate,
             (
                 spawn_block,
                 spawn_avatar.run_if(is_server),
                 spawn_npc.run_if(is_server.and_then(run_once())),
-                npc_move,
             ),
         );
     }
@@ -124,36 +134,43 @@ enum Dir {
     Right,
 }
 
-fn npc_move(mut npcs: Query<(&mut Transform, &mut Dir, &Npc)>, time: Res<NetworkFixedTime>) {
-    for (mut tf, mut dir, Npc { speed, .. }) in &mut npcs {
+#[derive(Debug, Actionlike, Clone, Copy, TypePath)]
+enum NpcAction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+fn npc_move(mut npcs: Query<(&mut Dir, &mut ActionState<NpcAction>, &Transform), With<Npc>>) {
+    for (mut dir, mut actions, tf) in &mut npcs {
+        if tf.translation.x <= -5.0 {
+            *dir = Dir::Right;
+        } else if tf.translation.x >= 5.0 {
+            *dir = Dir::Left;
+        }
         match *dir {
-            Dir::Left => {
-                tf.translation.x -= speed * time.duration().as_secs_f32();
-                if tf.translation.x <= -5.0 {
-                    *dir = Dir::Right;
-                }
-            }
-            Dir::Right => {
-                tf.translation.x += speed * time.duration().as_secs_f32();
-                if tf.translation.x >= 5.0 {
-                    *dir = Dir::Left;
-                }
-            }
+            Dir::Left => actions.press(NpcAction::Left),
+            Dir::Right => actions.press(NpcAction::Right),
         }
     }
 }
 
 fn npc_blueprint(mut commands: Commands, npcs: Query<(Entity, &Transform, &Npc), Without<Sprite>>) {
     for (entity, &transform, &Npc { color, .. }) in &npcs {
-        commands.entity(entity).insert(SpriteBundle {
-            sprite: Sprite {
-                color,
-                custom_size: Some((1.0, 1.0).into()),
+        commands.entity(entity).insert((
+            SpriteBundle {
+                sprite: Sprite {
+                    color,
+                    custom_size: Some((1.0, 1.0).into()),
+                    ..default()
+                },
+                transform,
                 ..default()
             },
-            transform,
-            ..default()
-        });
+            Collider::cuboid(1.0, 1.0),
+            InputManagerBundle::<NpcAction>::default(),
+        ));
     }
 }
 
