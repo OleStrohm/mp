@@ -11,7 +11,6 @@ use std::time::{Duration, SystemTime};
 
 use bevy::app::{AppExit, ScheduleRunnerPlugin};
 use bevy::audio::AudioPlugin;
-use bevy::gizmos::GizmoPlugin;
 use bevy::input::InputPlugin;
 use bevy::prelude::*;
 use bevy::utils::synccell::SyncCell;

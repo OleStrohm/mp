@@ -222,7 +222,7 @@ fn serialize_all_components(world: &World, entity: Entity) -> EntityUpdates {
 
 // If any error is found we just panic
 pub fn panic_on_error_system(mut renet_error: EventReader<NetcodeTransportError>) {
-    for e in renet_error.read() {
+    if let Some(e) = renet_error.read().next() {
         panic!("{}", e);
     }
 }
