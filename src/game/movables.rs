@@ -73,7 +73,7 @@ fn handle_movement(
                 dir.x += 1.0;
             }
             let movement = npc.speed * dir * fixed_time.duration().as_secs_f32();
-            (e, tf.translation + movement.extend(1.0))
+            (e, tf.translation + movement.extend(0.0))
         }))
         .collect::<Vec<_>>();
 

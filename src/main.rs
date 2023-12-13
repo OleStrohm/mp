@@ -7,13 +7,13 @@ use std::net::{SocketAddr, UdpSocket};
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
-use bevy::app::{AppExit, ScheduleRunnerPlugin};
+use bevy::app::AppExit;
 use bevy::audio::AudioPlugin;
-use bevy::input::InputPlugin;
 use bevy::prelude::*;
 use bevy::utils::synccell::SyncCell;
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use bevy_renet::renet::transport::{
     ClientAuthentication, NetcodeClientTransport, NetcodeServerTransport, ServerAuthentication,
     ServerConfig,
@@ -23,7 +23,8 @@ use bevy_xpbd_2d::plugins::PhysicsDebugPlugin;
 use owo_colors::OwoColorize;
 
 use crate::game::GamePlugin;
-use crate::replicate::{Owner, PROTOCOL_ID};
+use crate::player::Player;
+use crate::replicate::{Owner, PROTOCOL_ID, Replicate};
 
 use self::replicate::replication_connection_config;
 
@@ -92,13 +93,48 @@ pub fn server() {
         sender.send(buffer).unwrap();
     });
 
+    let monitor_width = 2560.0;
+    let monitor_height = 1440.0;
+
+    fn fix_window_pos(mut windows: Query<&mut Window>) {
+        for mut window in &mut windows {
+            window.position = WindowPosition::Centered(MonitorSelection::Primary);
+        }
+    }
+
     App::new()
         .add_plugins((
-            MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(16))),
-            InputPlugin,
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Making a game in Rust with Bevy - Server".to_string(),
+                        position: WindowPosition::Centered(MonitorSelection::Primary),
+                        resolution: (monitor_width / 2.0, monitor_height / 2.0).into(),
+                        resizable: false,
+                        decorations: false,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .disable::<AudioPlugin>(/* Disabled due to audio bug with pipewire */),
+            WorldInspectorPlugin::default(),
             GamePlugin,
         ))
         .add_systems(Startup, start_server_networking)
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn((
+                Replicate,
+                Player {
+                    color: Color::rgb(rand::random(), rand::random(), rand::random()),
+                    controller: Owner(1),
+                },
+                Transform::from_xyz(5.0, 5.0, 0.0),
+            ));
+        })
+        .add_systems(
+            Update,
+            fix_window_pos.run_if(any_with_component::<Window>().and_then(run_once())),
+        )
         .add_systems(Update, move |mut app_exit: EventWriter<AppExit>| {
             if let Ok("exit") = receiver.get().try_recv().as_deref() {
                 app_exit.send(AppExit);
@@ -156,15 +192,11 @@ pub fn client(main: bool, mut children: Option<(Child, Child)>) {
                             "Making a game in Rust with Bevy - player 2".to_string()
                         },
                         position: if main {
-                            WindowPosition::Centered(MonitorSelection::Primary)
+                            WindowPosition::At((10, 10+ (monitor_height / 4.75) as i32).into())
                         } else {
                             WindowPosition::At((10, 10).into())
                         },
-                        resolution: if main {
-                            (monitor_width / 2.0, monitor_height / 2.0).into()
-                        } else {
-                            (monitor_width / 4.75, monitor_height / 4.75).into()
-                        },
+                        resolution: (monitor_width / 4.75, monitor_height / 4.75).into(),
                         resizable: false,
                         decorations: false,
                         ..default()
@@ -181,6 +213,10 @@ pub fn client(main: bool, mut children: Option<(Child, Child)>) {
                 app_exit.send(AppExit);
             }
         })
+        //.add_systems(
+        //    Update,
+        //    fix_window_pos.run_if(any_with_component::<Window>().and_then(run_once())),
+        //)
         .add_systems(Last, move |app_exit: EventReader<AppExit>| {
             if !app_exit.is_empty() {
                 let Some((player2, server)) = children.as_mut() else {

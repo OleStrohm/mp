@@ -20,7 +20,7 @@ pub mod schedule;
 
 pub const PROTOCOL_ID: u64 = 7;
 
-#[derive(Resource, Deref, DerefMut, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Resource, Deref, DerefMut, Serialize, Deserialize, PartialEq)]
 pub struct Owner(pub u64);
 
 #[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default, PartialOrd)]

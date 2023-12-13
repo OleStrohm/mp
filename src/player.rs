@@ -32,24 +32,14 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        if app.is_plugin_added::<RenetClientPlugin>() {
-            app.add_plugins(InputManagerPlugin::<Action>::default());
-        }
-
-        app.replicate::<Player>()
+        app.add_plugins(InputManagerPlugin::<Action>::default())
+            .replicate::<Player>()
             .replicate::<Control>()
             .replicate_with::<Transform>(
                 |component| bincode::serialize(&component.translation).unwrap(),
                 |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
             )
-            .add_systems(
-                NetworkBlueprint,
-                (
-                    player_blueprint.run_if(resource_exists::<Owner>()),
-                    apply_deferred,
-                )
-                    .chain(),
-            )
+            .add_systems(NetworkBlueprint, player_blueprint)
             .add_systems(
                 NetworkPreUpdate,
                 update_mouse_pos
@@ -80,21 +70,28 @@ fn update_mouse_pos(
 
 fn player_blueprint(
     mut commands: Commands,
-    new_players: Query<(Entity, &Player), Added<Player>>,
-    client_id: Res<Owner>,
+    new_players: Query<(Entity, &Transform, &Player), Added<Player>>,
+    client_id: Option<Res<Owner>>,
 ) {
-    for (entity, player) in &new_players {
+    for (entity, &transform, player) in &new_players {
         let color = player.color;
-        let in_control = player.controller == *client_id;
+        let in_control = client_id
+            .as_ref()
+            .map(|id| player.controller == **id)
+            .unwrap_or(false);
 
-        commands.entity(entity).insert(SpriteBundle {
-            sprite: Sprite {
-                color,
-                custom_size: Some(Vec2::splat(1.0)),
+        commands.entity(entity).insert((
+            SpriteBundle {
+                sprite: Sprite {
+                    color,
+                    custom_size: Some(Vec2::splat(1.0)),
+                    ..default()
+                },
+                transform,
                 ..default()
             },
-            ..default()
-        });
+            Name::from(format!("Player - {}", player.controller.0)),
+        ));
 
         if in_control {
             let mut input_map = InputMap::default();
