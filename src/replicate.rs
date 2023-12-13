@@ -20,8 +20,11 @@ pub mod schedule;
 
 pub const PROTOCOL_ID: u64 = 7;
 
-#[derive(Debug, Resource, Deref, DerefMut, Serialize, Deserialize, PartialEq)]
-pub struct Owner(pub u64);
+#[derive(Debug, Resource, Serialize, Deserialize, PartialEq)]
+pub enum Owner {
+    Server,
+    Client(u64),
+}
 
 #[derive(Resource, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default, PartialOrd)]
 pub struct NetworkTick(pub u64);

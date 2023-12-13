@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy_renet::renet::ServerEvent;
 use bevy_xpbd_2d::components::Collider;
-use bevy_xpbd_2d::plugins::PhysicsPlugins;
+use bevy_xpbd_2d::plugins::{PhysicsDebugPlugin, PhysicsPlugins};
 use leafwing_input_manager::prelude::ActionState;
 use leafwing_input_manager::{Actionlike, InputManagerBundle};
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             PhysicsPlugins::default(),
+            PhysicsDebugPlugin::default(),
             ReplicationPlugin::with_step(FIXED_TIMESTEP),
             PredictionPlugin::<Action>::default(),
             PlayerPlugin,
@@ -103,14 +104,15 @@ fn spawn_avatar(mut commands: Commands, mut events: EventReader<ServerEvent>) {
                     .spawn((
                         Replicate,
                         Player {
+                            name: format!("{client_id}"),
                             color,
-                            controller: Owner(client_id.raw()),
+                            controller: Owner::Client(client_id.raw()),
                         },
                         Transform::from_translation(pos.extend(0.0)),
                     ))
                     .id();
 
-                println!("{client_id} connected! Creating the avatar as {avatar:?}");
+                println!("{client_id} connected! It's avatar is {avatar:?}");
             }
             ServerEvent::ClientDisconnected {
                 client_id: _client_id,
@@ -170,6 +172,7 @@ fn npc_blueprint(mut commands: Commands, npcs: Query<(Entity, &Transform, &Npc),
             },
             Collider::cuboid(1.0, 1.0),
             InputManagerBundle::<NpcAction>::default(),
+            Name::new("Npc"),
         ));
     }
 }

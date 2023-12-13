@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy::window::PrimaryWindow;
-use bevy_renet::RenetClientPlugin;
 use leafwing_input_manager::axislike::DualAxisData;
 use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -15,6 +14,7 @@ pub struct Control;
 
 #[derive(Component, Serialize, Deserialize)]
 pub struct Player {
+    pub name: String,
     pub color: Color,
     pub controller: Owner,
 }
@@ -34,12 +34,14 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(InputManagerPlugin::<Action>::default())
             .replicate::<Player>()
-            .replicate::<Control>()
             .replicate_with::<Transform>(
                 |component| bincode::serialize(&component.translation).unwrap(),
                 |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
             )
-            .add_systems(NetworkBlueprint, player_blueprint)
+            .add_systems(
+                NetworkBlueprint,
+                (player_blueprint, make_player_controllable).chain(),
+            )
             .add_systems(
                 NetworkPreUpdate,
                 update_mouse_pos
@@ -90,40 +92,46 @@ fn player_blueprint(
                 transform,
                 ..default()
             },
-            Name::from(format!("Player - {}", player.controller.0)),
+            Name::from(format!("Player - {}", player.name)),
         ));
 
         if in_control {
-            let mut input_map = InputMap::default();
-            input_map
-                .insert_multiple([
-                    (KeyCode::W, Action::Up),
-                    (KeyCode::A, Action::Left),
-                    (KeyCode::S, Action::Down),
-                    (KeyCode::D, Action::Right),
-                ])
-                .insert_multiple([(MouseButton::Left, Action::Main)]);
-
-            commands
-                .entity(entity)
-                .insert((
-                    Control,
-                    InputManagerBundle::<Action> {
-                        action_state: default(),
-                        input_map,
-                    },
-                ))
-                .with_children(|entity| {
-                    entity.spawn(SpriteBundle {
-                        sprite: Sprite {
-                            color: Color::GOLD,
-                            custom_size: Some(Vec2::splat(0.3)),
-                            ..default()
-                        },
-                        transform: Transform::from_xyz(0.0, 0.0, 1.0),
-                        ..default()
-                    });
-                });
+            commands.entity(entity).insert(Control);
         }
+    }
+}
+
+fn make_player_controllable(
+    mut commands: Commands,
+    controlled_players: Query<Entity, (With<Player>, Added<Control>)>,
+) {
+    for entity in &controlled_players {
+        let mut input_map = InputMap::default();
+        input_map
+            .insert_multiple([
+                (KeyCode::W, Action::Up),
+                (KeyCode::A, Action::Left),
+                (KeyCode::S, Action::Down),
+                (KeyCode::D, Action::Right),
+            ])
+            .insert_multiple([(MouseButton::Left, Action::Main)]);
+
+        commands
+            .entity(entity)
+            .insert(InputManagerBundle::<Action> {
+                action_state: default(),
+                input_map,
+            })
+            .with_children(|entity| {
+                entity.spawn(SpriteBundle {
+                    sprite: Sprite {
+                        color: Color::GOLD,
+                        custom_size: Some(Vec2::splat(0.3)),
+                        ..default()
+                    },
+                    transform: Transform::from_xyz(0.0, 0.0, 1.0),
+                    ..default()
+                });
+            });
     }
 }
