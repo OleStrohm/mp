@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy_renet::renet::ServerEvent;
-use bevy_xpbd_2d::components::Collider;
+use bevy_xpbd_2d::components::{Collider, RigidBody};
 use bevy_xpbd_2d::plugins::spatial_query::{RayCaster, RayHits};
 use bevy_xpbd_2d::plugins::{PhysicsDebugPlugin, PhysicsPlugins};
 use leafwing_input_manager::prelude::ActionState;
@@ -108,12 +108,12 @@ fn spawn_block(mut commands: Commands, players: Query<&ActionState<Action>>) {
 }
 
 fn bullets_hit_things(mut commands: Commands, bullets: Query<(Entity, &RayHits, &Bullet)>) {
-    for (bullet, hits, data) in &bullets {
+    for (bullet, hits, _data) in &bullets {
         if let Some(hit) = hits.iter_sorted().next() {
-            //if hit.time_of_impact <= 1.0 {
-            commands.entity(bullet).despawn();
-            commands.entity(hit.entity).despawn_recursive();
-            //}
+            if hit.time_of_impact <= 0.1 {
+                commands.entity(bullet).despawn();
+                commands.entity(hit.entity).despawn_recursive();
+            }
         }
     }
 }
@@ -151,6 +151,7 @@ fn bullet_blueprint(mut commands: Commands, new_bullets: Query<(Entity, &Bullet)
                 ..default()
             },
             RayCaster::new(Vec2::ZERO, bullet.dir.xy()),
+            Collider::ball(0.1),
             DieAfterTicks(60),
         ));
     }
