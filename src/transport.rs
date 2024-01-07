@@ -5,8 +5,8 @@ use bevy::app::AppExit;
 use bevy::prelude::*;
 use bevy::utils::synccell::SyncCell;
 use bevy::utils::HashMap;
-use bevy_renet::renet::{RenetClient, RenetServer, ClientId};
-use bevy_renet::{RenetClientPlugin, RenetServerPlugin};
+use bevy_renet::renet::{ClientId, RenetClient, RenetServer};
+use bevy_renet::{RenetClientPlugin, RenetReceive, RenetSend, RenetServerPlugin};
 
 struct Connection {
     sender: Sender<Vec<u8>>,
@@ -48,20 +48,26 @@ impl MemoryServerTransport {
             server.add_connection(new_client_id);
         }
 
+        let mut to_disconnect = vec![];
+
         for (&client_id, connection) in self.connections.iter_mut() {
             loop {
                 match connection.get().receiver.try_recv() {
                     Ok(packet) => {
                         server.process_packet_from(&packet, client_id).unwrap();
-                        continue
-                    },
+                        continue;
+                    }
                     Err(TryRecvError::Empty) => (),
                     Err(TryRecvError::Disconnected) => {
-                        //self.disconnect_client(client_id, server);
+                        to_disconnect.push(client_id);
                     }
                 }
                 break;
             }
+        }
+
+        for client_id in to_disconnect {
+            self.disconnect_client(client_id, server);
         }
     }
 
@@ -159,11 +165,15 @@ impl Plugin for MemoryServerPlugin {
             Self::update_system
                 .run_if(resource_exists::<RenetServer>())
                 .run_if(resource_exists::<MemoryServerTransport>())
+                .in_set(RenetReceive)
                 .after(RenetServerPlugin::update_system),
         )
         .add_systems(
             PostUpdate,
-            (Self::send_packets, Self::disconnect_on_exit)
+            (
+                Self::send_packets.in_set(RenetSend),
+                Self::disconnect_on_exit,
+            )
                 .run_if(resource_exists::<RenetServer>())
                 .run_if(resource_exists::<MemoryServerTransport>()),
         );
@@ -203,11 +213,15 @@ impl Plugin for MemoryClientPlugin {
             Self::update_system
                 .run_if(resource_exists::<RenetClient>())
                 .run_if(resource_exists::<MemoryClientTransport>())
+                .in_set(RenetReceive)
                 .after(RenetClientPlugin::update_system),
         )
         .add_systems(
             PostUpdate,
-            (Self::send_packets, Self::disconnect_on_exit)
+            (
+                Self::send_packets.in_set(RenetSend),
+                Self::disconnect_on_exit,
+            )
                 .run_if(resource_exists::<RenetClient>())
                 .run_if(resource_exists::<MemoryClientTransport>()),
         );
@@ -469,7 +483,10 @@ mod tests {
         let mut client = create_client_app(&mut server);
 
         server.update();
-        assert_eq!(server.world.resource::<RenetServer>().clients_id(), vec![ClientId::from_raw(0)]);
+        assert_eq!(
+            server.world.resource::<RenetServer>().clients_id(),
+            vec![ClientId::from_raw(0)]
+        );
         assert!(client
             .world
             .resource::<MemoryClientTransport>()
@@ -504,7 +521,10 @@ mod tests {
 
         server.update();
 
-        assert_eq!(server.world.resource::<RenetServer>().clients_id(), [ClientId::from_raw(0)]);
+        assert_eq!(
+            server.world.resource::<RenetServer>().clients_id(),
+            [ClientId::from_raw(0)]
+        );
         assert!(client
             .world
             .resource::<MemoryClientTransport>()

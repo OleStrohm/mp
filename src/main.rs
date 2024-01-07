@@ -133,6 +133,7 @@ pub fn server(mut clients: Vec<Child>) {
                 }
             }
         })
+        .add_systems(Update, bevy::window::close_on_esc)
         .add_systems(
             Update,
             move |mut windows: Query<&mut Window>, time: Res<Time>| {

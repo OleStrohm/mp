@@ -2,7 +2,7 @@ use bevy::reflect::TypePath;
 
 use crate::replicate::schedule::*;
 use crate::replicate::*;
-use crate::test_utils::tick;
+use crate::test_utils::{count, tick};
 
 use super::*;
 
@@ -95,9 +95,9 @@ fn predicted_spawn() {
     for app in [&mut server, &mut client] {
         app.replicate::<Player>().replicate::<Marker>().add_systems(
             NetworkUpdate,
-            // TODO: Make this spawn based on the client's actual action
-            |mut commands: Commands, players: Query<&ActionState<Action>>| {
-                for actions in &players {
+            |mut commands: Commands, players: Query<(Option<&Replicate>, &ActionState<Action>)>| {
+                for (has_replicate, actions) in &players {
+                    println!("checking actions for {}", has_replicate.is_some());
                     if actions.pressed(Action::Spawn) {
                         commands.spawn((Replicate, Marker));
                     }
@@ -107,8 +107,9 @@ fn predicted_spawn() {
     }
 
     server.world.spawn((Replicate, Player));
+    tick(&mut client);
     tick(&mut server);
-    client.update();
+    tick(&mut client);
 
     let player = client
         .world
@@ -122,40 +123,26 @@ fn predicted_spawn() {
     actions.press(Action::Spawn);
     client.world.entity_mut(player).insert(actions);
     tick(&mut client);
-    assert_eq!(
-        client.world.query::<&Marker>().iter(&client.world).count(),
-        1
-    );
+    assert_eq!(count::<&Marker>(&mut client), 1);
 
     let actions = ActionState::<Action>::default();
     client.world.entity_mut(player).insert(actions);
     tick(&mut client);
-    assert_eq!(
-        client.world.query::<&Marker>().iter(&client.world).count(),
-        1
-    );
-    assert_eq!(
-        server.world.query::<&Marker>().iter(&server.world).count(),
-        0
-    );
-
-    tick(&mut server);
-    assert_eq!(
-        server.world.query::<&Marker>().iter(&server.world).count(),
-        1
-    );
-    tick(&mut server);
-
-    tick(&mut client);
-    assert_eq!(
-        client.world.query::<&Marker>().iter(&client.world).count(),
-        1
-    );
+    assert_eq!(count::<&Marker>(&mut client), 1);
+    assert_eq!(count::<&Marker>(&mut server), 0);
 
     tick(&mut server);
     tick(&mut client);
-    assert_eq!(
-        client.world.query::<&Marker>().iter(&client.world).count(),
-        1
-    );
+    tick(&mut server);
+    tick(&mut client);
+    tick(&mut server);
+    tick(&mut client);
+    assert_eq!(count::<&Marker>(&mut server), 1);
+
+    tick(&mut client);
+    assert_eq!(count::<&Marker>(&mut client), 1);
+
+    tick(&mut server);
+    tick(&mut client);
+    assert_eq!(count::<&Marker>(&mut client), 1);
 }

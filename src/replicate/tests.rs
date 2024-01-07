@@ -24,9 +24,7 @@ fn basic_repl() {
     server.update();
     client.update();
 
-    let num_markers = client.world.query::<&Marker>().iter(&client.world).count();
-
-    assert!(num_markers == 1);
+    assert_eq!(count::<&Marker>(&mut client), 1);
 }
 
 #[test]
@@ -46,17 +44,9 @@ fn multiple_repl() {
     server.update();
     client.update();
 
-    let num_markers_1 = client.world.query::<&Marker>().iter(&client.world).count();
-    let num_markers_2 = client.world.query::<&Marker2>().iter(&client.world).count();
-    let num_markers_both = client
-        .world
-        .query::<(&Marker, &Marker2)>()
-        .iter(&client.world)
-        .count();
-
-    assert!(num_markers_1 == 2);
-    assert!(num_markers_2 == 3);
-    assert!(num_markers_both == 1);
+    assert_eq!(count::<&Marker>(&mut client), 2);
+    assert_eq!(count::<&Marker2>(&mut client), 3);
+    assert_eq!(count::<(&Marker, &Marker2)>(&mut client), 1);
 }
 
 #[test]
@@ -118,4 +108,57 @@ fn replicate_transform() {
 
     let tf = server.world.query::<&Transform>().single(&server.world);
     assert_eq!(Vec3::new(1.0, 2.0, 3.0), tf.translation);
+}
+
+#[test]
+fn remove_component() {
+    let mut server = create_server();
+    let mut client = create_client(&mut server);
+    for app in [&mut server, &mut client] {
+        app.replicate::<Marker>();
+    }
+
+    let marker = server.world.spawn((Replicate, Marker)).id();
+
+    server.update();
+    client.update();
+
+    assert_eq!(count::<&Marker>(&mut client), 1);
+
+    server.world.entity_mut(marker).remove::<Marker>();
+
+    server.update();
+    client.update();
+
+    assert_eq!(count::<&Marker>(&mut client), 0);
+
+    server.world.entity_mut(marker).insert(Marker);
+
+    server.update();
+    client.update();
+
+    assert_eq!(count::<&Marker>(&mut client), 1);
+}
+
+#[test]
+fn despawn_entity() {
+    let mut server = create_server();
+    let mut client = create_client(&mut server);
+    for app in [&mut server, &mut client] {
+        app.replicate::<Marker>();
+    }
+
+    let marker = server.world.spawn((Replicate, Marker)).id();
+
+    server.update();
+    client.update();
+
+    assert_eq!(count::<&Marker>(&mut client), 1);
+
+    server.world.despawn(marker);
+
+    server.update();
+    client.update();
+
+    assert_eq!(count::<&Marker>(&mut client), 0);
 }

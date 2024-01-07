@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use crate::player::Control;
 use crate::replicate::schedule::NetworkPreUpdate;
 use crate::replicate::{Channel, NetworkEntities, NetworkTick, SyncedServerTick};
+use crate::transport;
 use bevy::prelude::*;
 use bevy_renet::client_connected;
 use bevy_renet::renet::{RenetClient, RenetServer};
@@ -32,7 +33,8 @@ impl<A: Actionlike + Serialize + for<'a> Deserialize<'a> + Send + Sync + 'static
                 (
                     copy_input_for_tick::<A>,
                     apply_deferred,
-                    send_client_input::<A>.run_if(client_connected()),
+                    send_client_input::<A>
+                        .run_if(client_connected().or_else(transport::client_connected())),
                 )
                     .chain()
                     .run_if(not(resimulating))
@@ -146,8 +148,10 @@ fn send_client_input<A: Actionlike + Send + Sync + Serialize + 'static>(
     network_entities: Res<NetworkEntities>,
 ) {
     let Ok((entity, history)) = history.get_single() else {
+        println!("Could not find entity");
         return;
     };
+    println!("Sending history for {entity:?}");
 
     let server_entity = *network_entities
         .iter()
@@ -174,7 +178,6 @@ fn receive_client_input<A: Actionlike + for<'a> Deserialize<'a> + Send + Sync + 
     for client_id in server.clients_id() {
         while let Some(message) = server.receive_message(client_id, Channel::ReliableOrdered) {
             let packet = bincode::deserialize::<InputPacket<A>>(&message).unwrap();
-
             commands.entity(packet.entity).insert(packet.history);
         }
     }

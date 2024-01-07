@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, ecs::query::WorldQuery};
 use bevy_renet::renet::{RenetClient, RenetServer};
 
 use crate::replicate::schedule::{DoTick, TickStrategy};
@@ -47,4 +47,8 @@ pub fn create_client(server: &mut App) -> App {
 pub fn tick(app: &mut App) {
     app.insert_resource(DoTick);
     app.update();
+}
+
+pub fn count<Q: WorldQuery>(app: &mut App) -> usize {
+    app.world.query::<Q>().iter(&app.world).count()
 }

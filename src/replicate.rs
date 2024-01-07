@@ -6,6 +6,7 @@ use bevy_renet::renet::transport::NetcodeTransportError;
 use bevy_renet::renet::{ChannelConfig, ConnectionConfig, RenetClient, RenetServer, SendType};
 use bevy_renet::transport::{NetcodeClientPlugin, NetcodeServerPlugin};
 use bevy_renet::{RenetClientPlugin, RenetReceive, RenetSend, RenetServerPlugin};
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use self::schedule::{
@@ -148,19 +149,35 @@ fn copy_replicated_component<T: Component>(world: &mut World) {
 struct ReplicationPacket {
     tick: NetworkTick,
     updates: Vec<EntityUpdates>,
+    despawns: Vec<Entity>,
 }
 
 fn send_updated_components(world: &mut World) {
-    // Create the list of updates
     let updates = world
         .query_filtered::<Entity, With<Replicate>>()
         .iter(world)
         .map(|entity| serialize_all_components(world, entity))
         .collect();
+
+    let despawns = world
+        .removed_components()
+        .get(world.component_id::<Replicate>().unwrap())
+        .map(|events| {
+            events
+                .get_reader()
+                .read(events)
+                .map(|e| e.clone().into())
+                .collect_vec()
+        })
+        .unwrap_or_default();
+
     let tick = *world.resource::<NetworkTick>();
 
-    // send it in a REPLICATION_CHANNEL
-    let packet = ReplicationPacket { tick, updates };
+    let packet = ReplicationPacket {
+        tick,
+        updates,
+        despawns,
+    };
     let mut server = world.resource_mut::<RenetServer>();
 
     server.broadcast_message(Channel::Replication, bincode::serialize(&packet).unwrap());
@@ -175,7 +192,24 @@ fn receive_updated_components(world: &mut World) {
     {
         world.insert_resource(SyncedServerTick { tick: packet.tick });
 
-        for EntityUpdates { entity, updates } in packet.updates {
+        for despawn in packet.despawns {
+            if let Some(local_entity) = world.resource::<NetworkEntities>().get(&despawn).copied() {
+                world.despawn(local_entity);
+            }
+        }
+
+        for EntityUpdates {
+            entity,
+            updates,
+            removals,
+        } in packet.updates
+        {
+            for removal in removals {
+                world.resource_scope::<ReplicationFunctions, ()>(|world, f| {
+                    let apply = &f[removal].remove;
+                    apply(world, entity);
+                })
+            }
             for update in updates {
                 world.resource_scope::<ReplicationFunctions, ()>(|world, f| {
                     let apply = &f[update.replication_id].update;
@@ -190,6 +224,12 @@ fn receive_updated_components(world: &mut World) {
 struct EntityUpdates {
     entity: Entity,
     updates: Vec<UpdateComponent>,
+    removals: Vec<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct EntityDespawns {
+    entity: Entity,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -201,6 +241,8 @@ struct UpdateComponent {
 struct ReplicationFunction {
     gather: Box<dyn Fn(&World, Entity) -> Option<Vec<u8>> + Send + Sync>,
     update: Box<dyn Fn(&mut World, Entity, &[u8]) + Send + Sync>,
+    has_removed: Box<dyn Fn(&World, Entity) -> bool + Send + Sync>,
+    remove: Box<dyn Fn(&mut World, Entity) + Send + Sync>,
 }
 
 #[derive(Resource, Deref, DerefMut, Default)]
@@ -219,6 +261,13 @@ fn serialize_all_components(world: &World, entity: Entity) -> EntityUpdates {
                     data: (f.gather)(world, entity)?,
                 })
             })
+            .collect(),
+        removals: world
+            .resource::<ReplicationFunctions>()
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| (f.has_removed)(world, entity))
+            .map(|(replication_id, _)| replication_id)
             .collect(),
     }
 }
@@ -280,6 +329,24 @@ impl AppExt for App {
                                 .insert(entity, local_entity);
                         }
                     }
+                }),
+                has_removed: Box::new(move |world, entity| {
+                    let Some(replicate_component_id) = world.component_id::<T>() else {
+                        return false;
+                    };
+
+                    if let Some(events) = world.removed_components().get(replicate_component_id) {
+                        for event in events.get_reader().read(events) {
+                            if entity == (*event).clone().into() {
+                                return true;
+                            }
+                        }
+                    }
+
+                    false
+                }),
+                remove: Box::new(move |world, entity| {
+                    world.entity_mut(entity).remove::<T>();
                 }),
             });
         self
