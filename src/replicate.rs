@@ -320,7 +320,9 @@ impl AppExt for App {
                     let component = Replicated(update(data));
                     match local_entity {
                         Some(local_entity) => {
-                            world.entity_mut(local_entity).insert(component);
+                            if let Some(mut e) = world.get_entity_mut(local_entity) {
+                                e.insert(component);
+                            }
                         }
                         None => {
                             let local_entity = world.spawn(component).id();

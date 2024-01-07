@@ -15,8 +15,18 @@ impl Plugin for MovablePlugin {
         app.add_plugins(InputManagerPlugin::<NpcAction>::default());
 
         app.replicate_with::<Transform>(
-            |component| bincode::serialize(&component.translation).unwrap(),
-            |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
+            |component| {
+                bincode::serialize(&(component.translation, component.rotation, component.scale))
+                    .unwrap()
+            },
+            |data| {
+                let (translation, rotation, scale) = bincode::deserialize(data).unwrap();
+                Transform {
+                    translation,
+                    rotation,
+                    scale,
+                }
+            },
         )
         .add_systems(NetworkUpdate, handle_movement);
     }

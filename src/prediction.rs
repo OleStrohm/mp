@@ -2,10 +2,11 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use crate::player::Control;
-use crate::replicate::schedule::NetworkPreUpdate;
+use crate::replicate::schedule::{NetworkPostUpdate, NetworkPreUpdate};
 use crate::replicate::{Channel, NetworkEntities, NetworkTick, SyncedServerTick};
 use crate::transport;
 use bevy::prelude::*;
+use bevy::transform::systems::propagate_transforms;
 use bevy_renet::client_connected;
 use bevy_renet::renet::{RenetClient, RenetServer};
 use leafwing_input_manager::buttonlike::ButtonState;
@@ -49,7 +50,8 @@ impl<A: Actionlike + Serialize + for<'a> Deserialize<'a> + Send + Sync + 'static
                     .chain()
                     .run_if(resource_exists::<RenetServer>()),
             ),
-        );
+        )
+        .add_systems(NetworkPostUpdate, propagate_transforms);
     }
 }
 
@@ -108,12 +110,17 @@ fn copy_input_for_tick<A: Actionlike + Send + Sync + 'static>(
 
                 for a in actions.get_pressed() {
                     if !prev_actions.pressed(a.clone()) {
+                        println!("Just pressed something");
                         actions.action_data_mut(a).state = ButtonState::JustPressed;
+                    } else {
+                        actions.action_data_mut(a).state = ButtonState::Pressed;
                     }
                 }
                 for a in actions.get_released() {
                     if !prev_actions.released(a.clone()) {
                         actions.action_data_mut(a.clone()).state = ButtonState::JustReleased;
+                    } else {
+                        actions.action_data_mut(a.clone()).state = ButtonState::Released;
                     }
                 }
                 history.add_for_tick(*tick, actions);
@@ -148,10 +155,8 @@ fn send_client_input<A: Actionlike + Send + Sync + Serialize + 'static>(
     network_entities: Res<NetworkEntities>,
 ) {
     let Ok((entity, history)) = history.get_single() else {
-        println!("Could not find entity");
         return;
     };
-    println!("Sending history for {entity:?}");
 
     let server_entity = *network_entities
         .iter()

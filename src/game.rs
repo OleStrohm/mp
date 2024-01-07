@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy_renet::renet::ServerEvent;
 use bevy_xpbd_2d::components::Collider;
+use bevy_xpbd_2d::plugins::spatial_query::{RayCaster, RayHits};
 use bevy_xpbd_2d::plugins::{PhysicsDebugPlugin, PhysicsPlugins};
 use leafwing_input_manager::prelude::ActionState;
 use leafwing_input_manager::{Actionlike, InputManagerBundle};
@@ -34,13 +35,22 @@ impl Plugin for GamePlugin {
         .replicate::<Block>()
         .replicate::<Npc>()
         .replicate::<Dir>()
+        .replicate::<Bullet>()
+        .replicate::<DieAfterTicks>()
         .add_systems(Startup, spawn_camera)
-        .add_systems(NetworkBlueprint, (block_blueprint, npc_blueprint))
+        .add_systems(
+            NetworkBlueprint,
+            (block_blueprint, npc_blueprint, bullet_blueprint),
+        )
         .add_systems(NetworkPreUpdate, npc_move)
         .add_systems(
             NetworkUpdate,
             (
-                spawn_block,
+                //spawn_block,
+                spawn_bullet,
+                move_bullet,
+                bullets_hit_things,
+                despawn_bullets,
                 spawn_avatar.run_if(is_server),
                 spawn_npc.run_if(is_server.and_then(run_once())),
             ),
@@ -49,20 +59,36 @@ impl Plugin for GamePlugin {
 }
 
 #[derive(Component, Serialize, Deserialize)]
+struct DieAfterTicks(u32);
+
+#[derive(Component, Serialize, Deserialize)]
 struct Block {
     pos: Vec3,
 }
 
+#[derive(Component, Serialize, Deserialize)]
+pub struct Source(pub Entity);
+
+#[derive(Component, Serialize, Deserialize)]
+struct Bullet {
+    origin: Source,
+    pos: Vec3,
+    dir: Vec3,
+}
+
 fn block_blueprint(mut commands: Commands, new_blocks: Query<(Entity, &Block), Added<Block>>) {
     for (entity, block) in &new_blocks {
-        commands.entity(entity).insert(SpriteBundle {
-            sprite: Sprite {
-                color: Color::GRAY,
+        commands.entity(entity).insert((
+            Name::new("Bullet"),
+            SpriteBundle {
+                sprite: Sprite {
+                    color: Color::GRAY,
+                    ..default()
+                },
+                transform: Transform::from_translation(block.pos),
                 ..default()
             },
-            transform: Transform::from_translation(block.pos),
-            ..default()
-        });
+        ));
     }
 }
 
@@ -74,6 +100,78 @@ fn spawn_block(mut commands: Commands, players: Query<&ActionState<Action>>) {
                     Replicate,
                     Block {
                         pos: pos.xy().extend(0.0),
+                    },
+                ));
+            }
+        }
+    }
+}
+
+fn bullets_hit_things(mut commands: Commands, bullets: Query<(Entity, &RayHits, &Bullet)>) {
+    for (bullet, hits, data) in &bullets {
+        if let Some(hit) = hits.iter_sorted().next() {
+            //if hit.time_of_impact <= 1.0 {
+            commands.entity(bullet).despawn();
+            commands.entity(hit.entity).despawn_recursive();
+            //}
+        }
+    }
+}
+
+fn move_bullet(mut bullets: Query<(&mut Transform, &Bullet)>) {
+    for (mut tf, bullet) in &mut bullets {
+        tf.translation += bullet.dir * 0.1;
+    }
+}
+
+fn despawn_bullets(mut commands: Commands, mut bullets: Query<(Entity, &mut DieAfterTicks)>) {
+    for (bullet, mut death_timer) in &mut bullets {
+        death_timer.0 -= 1;
+        if death_timer.0 == 0 {
+            commands.entity(bullet).despawn();
+        }
+    }
+}
+
+fn bullet_blueprint(mut commands: Commands, new_bullets: Query<(Entity, &Bullet), Added<Bullet>>) {
+    for (entity, bullet) in &new_bullets {
+        println!("blueprinted bullet");
+        commands.entity(entity).insert((
+            Name::new("Bullet"),
+            SpriteBundle {
+                sprite: Sprite {
+                    color: Color::RED,
+                    ..default()
+                },
+                transform: Transform {
+                    translation: bullet.pos,
+                    scale: Vec3::splat(0.2),
+                    ..default()
+                },
+                ..default()
+            },
+            RayCaster::new(Vec2::ZERO, bullet.dir.xy()),
+            DieAfterTicks(60),
+        ));
+    }
+}
+
+fn spawn_bullet(
+    mut commands: Commands,
+    players: Query<(Entity, &Transform, &ActionState<Action>)>,
+) {
+    for (player, tf, actions) in &players {
+        if actions.just_pressed(Action::Shoot) {
+            if let Some(pos) = actions.axis_pair(Action::Shoot) {
+                println!("Spawn bullet");
+                commands.spawn((
+                    Replicate,
+                    Bullet {
+                        origin: Source(player),
+                        pos: tf.translation,
+                        dir: (pos.xy() - tf.translation.xy())
+                            .extend(0.0)
+                            .normalize_or_zero(),
                     },
                 ));
             }

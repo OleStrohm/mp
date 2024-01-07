@@ -75,10 +75,6 @@ fn start_client(index: usize, prefix: impl Display) -> std::process::Child {
     child
 }
 
-//fn send_app_exit(child: &mut Child) {
-//    write!(child.stdin.as_mut().unwrap(), "exit").unwrap()
-//}
-
 pub fn server(mut clients: Vec<Child>) {
     println!("Starting server!");
 
@@ -205,6 +201,7 @@ pub fn client(index: i32) {
                     ..default()
                 })
                 .disable::<AudioPlugin>(/* Disabled due to audio bug with pipewire */),
+            //WorldInspectorPlugin::default(),
             GamePlugin,
         ))
         .add_systems(Startup, start_client_networking)

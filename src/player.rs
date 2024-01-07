@@ -26,6 +26,7 @@ pub enum Action {
     Down,
     Left,
     Right,
+    Shoot,
 }
 
 pub struct PlayerPlugin;
@@ -45,7 +46,6 @@ impl Plugin for PlayerPlugin {
             .add_systems(
                 NetworkPreUpdate,
                 update_mouse_pos
-                    .run_if(is_client)
                     .run_if(not(resimulating))
                     .before(CommitActions),
             );
@@ -66,6 +66,7 @@ fn update_mouse_pos(
     {
         for mut actions in &mut action_query {
             actions.action_data_mut(Action::Main).axis_pair = Some(DualAxisData::from_xy(m_pos));
+            actions.action_data_mut(Action::Shoot).axis_pair = Some(DualAxisData::from_xy(m_pos));
         }
     };
 }
@@ -113,8 +114,9 @@ fn make_player_controllable(
                 (KeyCode::A, Action::Left),
                 (KeyCode::S, Action::Down),
                 (KeyCode::D, Action::Right),
+                (KeyCode::Space, Action::Shoot),
             ])
-            .insert_multiple([(MouseButton::Left, Action::Main)]);
+            .insert_multiple([(MouseButton::Left, Action::Shoot)]);
 
         commands
             .entity(entity)
