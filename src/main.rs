@@ -151,14 +151,17 @@ fn start_server_networking(mut commands: Commands) {
     let current_time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
-    let public_addr = "127.0.0.1:5000".parse::<SocketAddr>().unwrap();
+    //let public_addr = "127.0.0.1:5000".parse::<SocketAddr>().unwrap();
+    //let public_addr = "0.0.0.0:5000".parse::<SocketAddr>().unwrap();
+    let public_addr = "192.168.0.50:5000".parse::<SocketAddr>().unwrap();
+    //let localhost = "127.0.0.1:5000".parse::<SocketAddr>().unwrap();
     let socket = UdpSocket::bind(public_addr).unwrap();
     let server_config = ServerConfig {
         max_clients: 64,
         protocol_id: PROTOCOL_ID,
         authentication: ServerAuthentication::Unsecure,
         current_time,
-        public_addresses: vec![public_addr],
+        public_addresses: vec![public_addr],//, localhost],
     };
 
     let transport = NetcodeServerTransport::new(server_config, socket).unwrap();
@@ -226,8 +229,8 @@ fn start_client_networking(mut commands: Commands) {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
     let client_id = rand::random();
-    let server_addr = "127.0.0.1:5000".parse::<SocketAddr>().unwrap();
-    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let server_addr = "192.168.0.50:5000".parse::<SocketAddr>().unwrap();
+    let socket = UdpSocket::bind("192.168.0.50:0").unwrap();
     let authentication = ClientAuthentication::Unsecure {
         client_id,
         protocol_id: PROTOCOL_ID,
