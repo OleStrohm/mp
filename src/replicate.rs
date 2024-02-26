@@ -21,7 +21,7 @@ pub mod schedule;
 
 pub const PROTOCOL_ID: u64 = 7;
 
-#[derive(Debug, Resource, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Resource, Serialize, Deserialize, PartialEq, Component, Clone, Copy)]
 pub enum Owner {
     Server,
     Client(u64),

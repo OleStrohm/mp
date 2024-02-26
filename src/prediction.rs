@@ -110,7 +110,6 @@ fn copy_input_for_tick<A: Actionlike + Send + Sync + 'static>(
 
                 for a in actions.get_pressed() {
                     if !prev_actions.pressed(a.clone()) {
-                        println!("Just pressed something");
                         actions.action_data_mut(a).state = ButtonState::JustPressed;
                     } else {
                         actions.action_data_mut(a).state = ButtonState::Pressed;

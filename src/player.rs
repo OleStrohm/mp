@@ -6,8 +6,8 @@ use leafwing_input_manager::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::prediction::{resimulating, CommitActions};
-use crate::replicate::schedule::{NetworkBlueprint, NetworkPreUpdate};
-use crate::replicate::{is_client, AppExt, Owner};
+use crate::replicate::schedule::{NetworkBlueprint, NetworkPreUpdate, NetworkUpdate};
+use crate::replicate::{AppExt, Owner};
 
 #[derive(Component, Serialize, Deserialize, Clone)]
 pub struct Control;
@@ -48,9 +48,12 @@ impl Plugin for PlayerPlugin {
                 update_mouse_pos
                     .run_if(not(resimulating))
                     .before(CommitActions),
-            );
+            )
+            .add_systems(NetworkUpdate, rotate_player);
     }
 }
+
+fn rotate_player() {}
 
 fn update_mouse_pos(
     mut action_query: Query<&mut ActionState<Action>, With<Control>>,
@@ -93,6 +96,7 @@ fn player_blueprint(
                 transform,
                 ..default()
             },
+            player.controller,
             Name::from(format!("Player - {}", player.name)),
         ));
 
@@ -104,9 +108,10 @@ fn player_blueprint(
 
 fn make_player_controllable(
     mut commands: Commands,
-    controlled_players: Query<Entity, (With<Player>, Added<Control>)>,
+    mut controlled_players: Query<(Entity, &mut Transform), (With<Player>, Added<Control>)>,
 ) {
-    for entity in &controlled_players {
+    for (entity, mut tf) in &mut controlled_players {
+        tf.translation.z = 1.0;
         let mut input_map = InputMap::default();
         input_map
             .insert_multiple([

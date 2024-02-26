@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy_renet::renet::ServerEvent;
-use bevy_xpbd_2d::components::{Collider, RigidBody};
+use bevy_xpbd_2d::components::Collider;
 use bevy_xpbd_2d::plugins::spatial_query::{RayCaster, RayHits};
 use bevy_xpbd_2d::plugins::{PhysicsDebugPlugin, PhysicsPlugins};
 use leafwing_input_manager::prelude::ActionState;
@@ -92,20 +92,20 @@ fn block_blueprint(mut commands: Commands, new_blocks: Query<(Entity, &Block), A
     }
 }
 
-fn spawn_block(mut commands: Commands, players: Query<&ActionState<Action>>) {
-    for actions in &players {
-        if actions.just_pressed(Action::Main) {
-            if let Some(pos) = actions.axis_pair(Action::Main) {
-                commands.spawn((
-                    Replicate,
-                    Block {
-                        pos: pos.xy().extend(0.0),
-                    },
-                ));
-            }
-        }
-    }
-}
+//fn spawn_block(mut commands: Commands, players: Query<&ActionState<Action>>) {
+//    for actions in &players {
+//        if actions.just_pressed(Action::Main) {
+//            if let Some(pos) = actions.axis_pair(Action::Main) {
+//                commands.spawn((
+//                    Replicate,
+//                    Block {
+//                        pos: pos.xy().extend(0.0),
+//                    },
+//                ));
+//            }
+//        }
+//    }
+//}
 
 fn bullets_hit_things(mut commands: Commands, bullets: Query<(Entity, &RayHits, &Bullet)>) {
     for (bullet, hits, _data) in &bullets {
@@ -192,7 +192,11 @@ fn spawn_camera(mut commands: Commands) {
     });
 }
 
-fn spawn_avatar(mut commands: Commands, mut events: EventReader<ServerEvent>) {
+fn spawn_avatar(
+    mut commands: Commands,
+    mut events: EventReader<ServerEvent>,
+    players: Query<(Entity, &Owner)>,
+) {
     for event in events.read() {
         match event {
             ServerEvent::ClientConnected { client_id } => {
@@ -214,10 +218,16 @@ fn spawn_avatar(mut commands: Commands, mut events: EventReader<ServerEvent>) {
                 println!("{client_id} connected! It's avatar is {avatar:?}");
             }
             ServerEvent::ClientDisconnected {
-                client_id: _client_id,
+                client_id,
                 reason: _reason,
             } => {
-                println!("{_client_id} disconnected ({_reason})");
+                println!("{client_id} disconnected ({_reason})");
+
+                for (entity, owner) in &players {
+                    if *owner == Owner::Client(client_id.raw()) {
+                        commands.entity(entity).despawn();
+                    }
+                }
             }
         }
     }

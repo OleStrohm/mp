@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use itertools::multizip;
 use leafwing_input_manager::prelude::*;
 
 use crate::player::{Action, Player};
@@ -87,28 +86,9 @@ fn handle_movement(
         }))
         .collect::<Vec<_>>();
 
-    let can_move = new_position
-        .iter()
-        .map(|(e, p)| {
-            moving_entities
-                .p1()
-                .iter()
-                .filter(|(other_entity, _)| e != other_entity)
-                .map(|(_, other_tf)| {
-                    let diff = p.xy() - other_tf.translation.xy();
-                    diff.to_array()
-                        .into_iter()
-                        .any(|distance| distance.abs() >= 1.0)
-                })
-                .all(|outside| outside)
-        })
-        .collect::<Vec<_>>();
-
-    for ((entity, new_pos), can_move) in multizip((new_position.into_iter(), can_move)) {
-        if can_move {
-            let mut query = moving_entities.p2();
-            let (_, mut tf) = query.get_mut(entity).unwrap();
-            tf.translation = new_pos;
-        }
+    for (entity, new_pos) in new_position {
+        let mut query = moving_entities.p2();
+        let (_, mut tf) = query.get_mut(entity).unwrap();
+        tf.translation = new_pos;
     }
 }
