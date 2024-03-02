@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bevy::ecs::schedule::{ScheduleLabel, InternedScheduleLabel};
+use bevy::ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
 use bevy::prelude::*;
 use bevy_renet::renet::RenetClient;
 use itertools::Itertools;
@@ -137,7 +137,9 @@ pub(super) fn run_network_fixed(world: &mut World) {
 
 fn how_many_times_to_run(world: &mut World) -> u32 {
     match *world.resource::<TickStrategy>() {
-        TickStrategy::Automatic => world.resource_mut::<NetworkFixedTime>().times_finished_this_tick(),
+        TickStrategy::Automatic => world
+            .resource_mut::<NetworkFixedTime>()
+            .times_finished_this_tick(),
         TickStrategy::Manual => world.remove_resource::<DoTick>().map(|_| 1).unwrap_or(0),
     }
 }

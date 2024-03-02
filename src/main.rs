@@ -163,7 +163,7 @@ fn start_server_networking(mut commands: Commands) {
         protocol_id: PROTOCOL_ID,
         authentication: ServerAuthentication::Unsecure,
         current_time,
-        public_addresses: vec![/*public_addr, */localhost],
+        public_addresses: vec![/*public_addr, */ localhost],
     };
 
     let transport = NetcodeServerTransport::new(server_config, socket).unwrap();

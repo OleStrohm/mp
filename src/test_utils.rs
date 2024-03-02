@@ -1,4 +1,4 @@
-use bevy::{prelude::*, ecs::query::WorldQuery};
+use bevy::{ecs::query::WorldQuery, prelude::*};
 use bevy_renet::renet::{RenetClient, RenetServer};
 
 use crate::replicate::schedule::{DoTick, TickStrategy};
