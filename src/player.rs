@@ -35,10 +35,6 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(InputManagerPlugin::<Action>::default())
             .replicate::<Player>()
-            .replicate_with::<Transform>(
-                |component| bincode::serialize(&component.translation).unwrap(),
-                |data| Transform::from_translation(bincode::deserialize::<Vec3>(data).unwrap()),
-            )
             .add_systems(
                 NetworkBlueprint,
                 (player_blueprint, make_player_controllable).chain(),
@@ -49,11 +45,22 @@ impl Plugin for PlayerPlugin {
                     .run_if(not(resimulating))
                     .before(CommitActions),
             )
-            .add_systems(NetworkUpdate, rotate_player);
+            .add_systems(NetworkUpdate, rotate_player)
+        ;
     }
 }
 
-fn rotate_player() {}
+fn rotate_player(mut controlled_players: Query<(&mut Transform, &ActionState<Action>)>) {
+    for (mut tf, actions) in &mut controlled_players {
+        if let Some(pos) = actions.axis_pair(Action::Main) {
+            let m_pos = pos.xy();
+            let point_dir = m_pos - tf.translation.xy();
+
+            tf.rotation =
+                Quat::from_rotation_arc(Vec3::X, point_dir.normalize_or_zero().extend(0.0));
+        }
+    }
+}
 
 fn update_mouse_pos(
     mut action_query: Query<&mut ActionState<Action>, With<Control>>,

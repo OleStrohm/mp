@@ -146,3 +146,80 @@ fn predicted_spawn() {
     tick(&mut client);
     assert_eq!(count::<&Marker>(&mut client), 1);
 }
+
+#[test]
+fn client_moving() {
+    #[derive(Component, Serialize, Deserialize)]
+    struct Pos(u64);
+
+    #[derive(Actionlike, Clone, Copy, TypePath, Serialize, Deserialize)]
+    enum OneAction {
+        Left,
+    }
+
+    let mut server = create_server::<OneAction>();
+    let mut client = create_client::<OneAction>(&mut server);
+    for app in [&mut server, &mut client] {
+        app.replicate::<Pos>().add_systems(
+            NetworkUpdate,
+            |mut positions: Query<(&mut Pos, &ActionState<OneAction>)>| {
+                for (mut pos, actions) in &mut positions {
+                    if actions.pressed(OneAction::Left) {
+                        pos.0 += 1;
+                    }
+                }
+            },
+        );
+    }
+
+    server.world.spawn((Replicate, Pos(0)));
+
+    tick(&mut server);
+    client.update();
+
+    for pos in server.world.query::<&Pos>().iter(&server.world) {
+        assert_eq!(pos.0, 0);
+    }
+
+    {
+        for pos in server.world.query::<&Pos>().iter(&server.world) {
+            assert_eq!(pos.0, 0);
+        }
+        let entity = client
+            .world
+            .query_filtered::<Entity, With<Pos>>()
+            .iter_mut(&mut client.world)
+            .next()
+            .unwrap();
+        client
+            .world
+            .entity_mut(entity)
+            .insert((Control, InputManagerBundle::<OneAction>::default()));
+        client
+            .world
+            .entity_mut(entity)
+            .get_mut::<ActionState<OneAction>>()
+            .unwrap()
+            .press(OneAction::Left);
+    }
+    tick(&mut client);
+    tick(&mut client);
+    tick(&mut server);
+
+    for pos in server.world.query::<&Pos>().iter(&server.world) {
+        assert_eq!(pos.0, 1);
+    }
+    for pos in client.world.query::<&Pos>().iter(&client.world) {
+        assert_eq!(pos.0, 2);
+    }
+
+    tick(&mut server);
+    tick(&mut client);
+
+    for pos in server.world.query::<&Pos>().iter(&server.world) {
+        assert_eq!(pos.0, 2);
+    }
+    for pos in client.world.query::<&Pos>().iter(&client.world) {
+        assert_eq!(pos.0, 3);
+    }
+}

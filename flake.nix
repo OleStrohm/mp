@@ -22,7 +22,7 @@
 
         # For `nix develop`:
         devShell = pkgs.mkShell rec {
-          nativeBuildInputs = with pkgs; [ rustc cargo rust-analyzer rustfmt pkg-config ];
+          nativeBuildInputs = with pkgs; [ rustc cargo rust-analyzer rustfmt clippy pkg-config ];
           buildInputs = with pkgs; [
             udev alsa-lib vulkan-loader
             xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
