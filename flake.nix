@@ -1,34 +1,34 @@
 {
+  description = "Rust flake with nightly";
+
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    naersk.url = "github:nix-community/naersk";
+    rust-overlay.url = "github:oxalica/rust-overlay";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
   };
 
-  outputs = { self, flake-utils, naersk, nixpkgs }:
+  outputs = { self, flake-utils, rust-overlay, nixpkgs }:
     flake-utils.lib.eachDefaultSystem (system:
       let
+        overlays = [ (import rust-overlay) ];
         pkgs = (import nixpkgs) {
-          inherit system;
+          inherit system overlays;
         };
-
-        naersk' = pkgs.callPackage naersk {};
-
-      in rec {
-        # For `nix build` & `nix run`:
-        defaultPackage = naersk'.buildPackage {
-          src = ./.;
-        };
-
-        # For `nix develop`:
-        devShell = pkgs.mkShell rec {
-          nativeBuildInputs = with pkgs; [ rustc cargo rust-analyzer rustfmt clippy pkg-config ];
-          buildInputs = with pkgs; [
+      in
+      with pkgs;
+      {
+        devShells.default = mkShell rec {
+          nativeBuildInputs = [
+            (rust-bin.stable.latest.default.override {
+              extensions = [ "rust-analyzer" "clippy" "rust-src" ];
+            })
+          ];
+          buildInputs = [
             udev alsa-lib vulkan-loader
             xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
             libxkbcommon wayland
           ];
-          LD_LIBRARY_PATH = with pkgs; lib.makeLibraryPath buildInputs;
+          LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
         };
       }
     );
