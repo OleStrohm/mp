@@ -1,16 +1,19 @@
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
-use crate::player::Control;
+use crate::player::{Action, Control};
 use crate::replicate::schedule::{NetworkPostUpdate, NetworkPreUpdate};
 use crate::replicate::{Channel, NetworkEntities, NetworkTick, SyncedServerTick};
 use crate::transport;
 use bevy::prelude::*;
 use bevy::transform::systems::propagate_transforms;
+use bevy::window::PrimaryWindow;
 use bevy_renet::client_connected;
 use bevy_renet::renet::{RenetClient, RenetServer};
+use leafwing_input_manager::axislike::DualAxisData;
 use leafwing_input_manager::buttonlike::ButtonState;
 use leafwing_input_manager::prelude::*;
+use leafwing_input_manager::systems::update_action_state;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -32,6 +35,25 @@ impl<A: Actionlike + Serialize + for<'a> Deserialize<'a> + Send + Sync + 'static
             NetworkPreUpdate,
             (
                 (
+                    update_action_state::<A>,
+                    |mut action_query: Query<&mut ActionState<Action>, With<Control>>,
+                     camera: Query<(&Camera, &GlobalTransform)>,
+                     window: Query<&Window, With<PrimaryWindow>>| {
+                        let (camera, camera_tf) = camera.single();
+                        let window = window.single();
+
+                        if let Some(m_pos) = window
+                            .cursor_position()
+                            .and_then(|p| camera.viewport_to_world_2d(camera_tf, p))
+                        {
+                            for mut actions in &mut action_query {
+                                actions.action_data_mut(Action::Main).axis_pair =
+                                    Some(DualAxisData::from_xy(m_pos));
+                                actions.action_data_mut(Action::Shoot).axis_pair =
+                                    Some(DualAxisData::from_xy(m_pos));
+                            }
+                        };
+                    },
                     copy_input_for_tick::<A>,
                     apply_deferred,
                     send_client_input::<A>
@@ -132,6 +154,15 @@ fn copy_input_for_tick<A: Actionlike + Send + Sync + 'static>(
             }
             None => {
                 let mut history = ActionHistory::<A>::default();
+                let mut actions = actions.clone();
+
+                for a in actions.get_pressed() {
+                    actions.action_data_mut(a).state = ButtonState::JustPressed;
+                }
+                for a in actions.get_released() {
+                    actions.action_data_mut(a.clone()).state = ButtonState::JustReleased;
+                }
+
                 history.add_for_tick(*tick, actions.clone());
 
                 commands.entity(entity).insert(history);

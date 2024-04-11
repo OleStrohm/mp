@@ -9,7 +9,7 @@ use leafwing_input_manager::{Actionlike, InputManagerBundle};
 use serde::{Deserialize, Serialize};
 
 use crate::player::{Action, Player, PlayerPlugin};
-use crate::prediction::PredictionPlugin;
+use crate::prediction::{PredictionPlugin, Resimulating};
 use crate::replicate::schedule::{NetworkBlueprint, NetworkPreUpdate, NetworkUpdate};
 use crate::replicate::{is_server, AppExt, Owner, Replicate, ReplicationPlugin};
 
@@ -152,7 +152,7 @@ fn bullet_blueprint(mut commands: Commands, new_bullets: Query<(Entity, &Bullet)
             },
             RayCaster::new(Vec2::ZERO, bullet.dir.xy()),
             Collider::ball(0.1),
-            DieAfterTicks(60),
+            DieAfterTicks(100),
         ));
     }
 }
@@ -160,11 +160,11 @@ fn bullet_blueprint(mut commands: Commands, new_bullets: Query<(Entity, &Bullet)
 fn spawn_bullet(
     mut commands: Commands,
     players: Query<(Entity, &Transform, &ActionState<Action>)>,
+    is_resimulating: Option<Res<Resimulating>>,
 ) {
     for (player, tf, actions) in &players {
         if actions.just_pressed(Action::Shoot) {
             if let Some(pos) = actions.axis_pair(Action::Shoot) {
-                println!("Spawn bullet");
                 commands.spawn((
                     Replicate,
                     Bullet {
@@ -175,6 +175,8 @@ fn spawn_bullet(
                             .normalize_or_zero(),
                     },
                 ));
+            } else if is_resimulating.is_none() {
+                println!("Fail to Shoot!");
             }
         }
     }

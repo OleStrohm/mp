@@ -186,6 +186,7 @@ fn send_updated_components(world: &mut World) {
 fn receive_updated_components(world: &mut World) {
     while let Some(packet) = world
         .resource_scope::<RenetClient, _>(|_, mut client| {
+            //println!("Rtt: {}", client.rtt());
             client.receive_message(Channel::Replication)
         })
         .map(|msg| bincode::deserialize::<ReplicationPacket>(&msg).unwrap())

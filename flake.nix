@@ -26,7 +26,7 @@
           buildInputs = [
             udev alsa-lib vulkan-loader
             xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
-            libxkbcommon wayland
+            libxkbcommon wayland pkg-config
           ];
           LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
         };
