@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::player::{Action, Player, PlayerPlugin};
 use crate::prediction::{PredictionPlugin, Resimulating};
 use crate::replicate::schedule::{NetworkBlueprint, NetworkPreUpdate, NetworkUpdate};
-use crate::replicate::{is_server, AppExt, Owner, Replicate, ReplicationPlugin};
+use crate::replicate::{is_server, AppExt, NetworkTick, Owner, Replicate, ReplicationPlugin};
 
 use self::movables::MovablePlugin;
 
@@ -255,11 +255,21 @@ enum NpcAction {
     Right,
 }
 
-fn npc_move(mut npcs: Query<(&mut Dir, &mut ActionState<NpcAction>, &Transform), With<Npc>>) {
+fn npc_move(
+    mut npcs: Query<(&mut Dir, &mut ActionState<NpcAction>, &Transform), With<Npc>>,
+    tick: Res<NetworkTick>,
+    is_resimulating: Option<Res<Resimulating>>,
+) {
     for (mut dir, mut actions, tf) in &mut npcs {
         if tf.translation.x <= -5.0 {
+            if is_resimulating.is_none() {
+                println!("switching direction at {tick:?}");
+            }
             *dir = Dir::Right;
         } else if tf.translation.x >= 5.0 {
+            if is_resimulating.is_none() {
+                println!("switching direction at {tick:?}");
+            }
             *dir = Dir::Left;
         }
         match *dir {

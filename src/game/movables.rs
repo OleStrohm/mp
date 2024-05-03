@@ -31,7 +31,7 @@ impl Plugin for MovablePlugin {
     }
 }
 
-fn handle_movement(
+pub fn handle_movement(
     mut moving_entities: ParamSet<(
         (
             Query<(Entity, &Transform, &ActionState<Action>), With<Player>>,
